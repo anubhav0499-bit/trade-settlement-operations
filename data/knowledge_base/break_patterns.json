@@ -1,0 +1,152 @@
+[
+  {
+    "id": "KB-001",
+    "title": "Quantity Mismatch — Partial Fill Not Reported",
+    "category": "QUANTITY_MISMATCH",
+    "description": "Broker executed a partial fill but reported the full order quantity. The custodian/counterparty reported only the executed quantity.",
+    "root_cause": "Partial fill reporting lag between broker and OMS. The broker's back-office system aggregated two partial fills into one confirmation line, while the OMS captured each fill separately.",
+    "resolution": "Request broker to reissue confirmation with per-fill breakdown. Reconcile against exchange trade log (NSCCL/ICCL member trade file). Amend OMS entries if broker confirmation is correct.",
+    "prevention": "Implement real-time partial fill status sync between broker FIX connection and OMS. Set up an automated alert when broker confirmation quantity diverges from OMS fill sum by more than 1%.",
+    "frequency": "Common — accounts for ~30% of all quantity breaks in Indian equity settlement."
+  },
+  {
+    "id": "KB-002",
+    "title": "Quantity Mismatch — Corporate Action Adjustment",
+    "category": "QUANTITY_MISMATCH",
+    "description": "A stock split or bonus issue between trade date and settlement date changed the expected quantity, but one party's system did not apply the adjustment.",
+    "root_cause": "The corporate action adjustment was applied to the OMS position but not reflected in the broker's confirmation, or vice versa. This is especially common for bonus issues where the ex-date falls between T and T+1.",
+    "resolution": "Check the corporate actions calendar for the ISIN. Verify the record date and ex-date against the trade and settlement dates. Apply the adjustment ratio to the pre-event quantity and confirm the post-event quantity with the counterparty.",
+    "prevention": "Automate corporate action adjustments in the obligation engine. Cross-reference the CA calendar before netting.",
+    "frequency": "Moderate — seasonal, spikes around quarterly result seasons."
+  },
+  {
+    "id": "KB-003",
+    "title": "Price Mismatch — Weighted Average vs Last Traded Price",
+    "category": "PRICE_MISMATCH",
+    "description": "Internal system uses VWAP (volume-weighted average price) while the counterparty reported last traded price (LTP) or a different averaging methodology.",
+    "root_cause": "VWAP and LTP can diverge significantly for illiquid stocks or during volatile trading sessions. The counterparty's system may use a different price methodology than what the netting engine expects.",
+    "resolution": "Compare the VWAP calculation against the exchange's official VWAP for the session. If the internal VWAP is correct, request the counterparty to re-confirm using VWAP. If using different methodologies, escalate to settlement operations manager for agreement on price.",
+    "prevention": "Align on price methodology with all counterparties during onboarding. Document the agreed methodology in the counterparty SSI/SLA.",
+    "frequency": "Common — ~25% of all price breaks. More frequent for mid/small-cap stocks."
+  },
+  {
+    "id": "KB-004",
+    "title": "Price Mismatch — Stale Price from Previous Session",
+    "category": "PRICE_MISMATCH",
+    "description": "The counterparty's confirmation used the closing price from the previous session instead of the actual execution price.",
+    "root_cause": "Counterparty's system had a delayed price feed update. The confirmation was generated using cached/stale prices before the current session's prices were loaded.",
+    "resolution": "Request counterparty to reconfirm with actual execution price from the exchange trade file. Verify against NSCCL/ICCL obligation report.",
+    "prevention": "Monitor counterparty confirmation latency. Flag any confirmation where the reported price differs from the exchange-reported execution price by more than the tolerance threshold.",
+    "frequency": "Moderate — more common with smaller brokers or during system upgrades."
+  },
+  {
+    "id": "KB-005",
+    "title": "SSI Missing — New Counterparty Without Setup",
+    "category": "SSI_MISSING_OR_INCORRECT",
+    "description": "Trade executed with a counterparty whose standing settlement instructions have not been set up in the golden copy reference.",
+    "root_cause": "The counterparty was recently onboarded but SSI setup was not completed before the first trade. The new accounts team did not coordinate with the settlements team.",
+    "resolution": "Immediately contact the counterparty's operations team to obtain SSI details (DP ID, settlement bank, bank account). Create the SSI record in the golden copy and re-validate the obligation.",
+    "prevention": "Implement a pre-trade SSI check that blocks execution with counterparties that have no active SSI record. Add SSI setup to the mandatory onboarding checklist.",
+    "frequency": "Moderate — ~10% of SSI breaks. Preventable with process controls."
+  },
+  {
+    "id": "KB-006",
+    "title": "SSI Incorrect — DP ID Changed After Migration",
+    "category": "SSI_MISSING_OR_INCORRECT",
+    "description": "The counterparty migrated from CDSL to NSDL (or vice versa) and the SSI record was not updated in the golden copy.",
+    "root_cause": "Depository migration requires updating the DP ID and DP account in the SSI reference. If the counterparty does not notify or the update is delayed, instructions will be sent to the old depository.",
+    "resolution": "Contact the counterparty to confirm the new DP details. Update the SSI golden copy with the new record (effective date = migration date). Re-generate the settlement instruction with corrected SSI.",
+    "prevention": "Require quarterly SSI confirmation from all counterparties. Set up alerts when a counterparty's depository participant changes in the NSDL/CDSL registry.",
+    "frequency": "Low but high-impact — each instance delays settlement by at least one day."
+  },
+  {
+    "id": "KB-007",
+    "title": "Late Custodian Confirmation — FPI Compliance Delay",
+    "category": "LATE_CONFIRMATION",
+    "description": "The custodian did not confirm the obligation by the cutoff time because the FPI (Foreign Portfolio Investor) client required additional compliance review.",
+    "root_cause": "FPI trades may require SEBI compliance checks (position limits, sectoral caps) before the custodian can confirm. For large block trades, this review can exceed the 1:00 PM T+1 cutoff.",
+    "resolution": "Contact the custodian's compliance team for the status of the review. If the trade is compliant, request immediate confirmation. If the confirmation cutoff has passed, the obligation reverts to the trading member — coordinate with the trading desk for re-instruction.",
+    "prevention": "Pre-clear FPI compliance for large orders before execution. Set up an alert 2 hours before the confirmation cutoff for pending FPI trades.",
+    "frequency": "Moderate — ~10% of late confirmations involve FPI compliance delays."
+  },
+  {
+    "id": "KB-008",
+    "title": "Late Custodian Confirmation — System Outage at Custodian",
+    "category": "LATE_CONFIRMATION",
+    "description": "The custodian's confirmation system was down during the confirmation window, preventing timely confirmation.",
+    "root_cause": "Custodian's back-office system had a planned or unplanned outage. The backup confirmation process (manual/phone) was not triggered in time.",
+    "resolution": "Contact the custodian's operations desk to confirm via backup channel (email/phone). Document the outage for the incident log. If confirmation cannot be obtained, prepare for obligation reversion to the trading member.",
+    "prevention": "Monitor custodian system availability. Maintain a documented backup confirmation process for each custodian. Set up monitoring alerts for custodian connectivity.",
+    "frequency": "Low — but when it occurs, affects multiple obligations simultaneously."
+  },
+  {
+    "id": "KB-009",
+    "title": "Counterparty Fail — Short Delivery Due to Insufficient Holdings",
+    "category": "COUNTERPARTY_FAIL",
+    "description": "The selling counterparty did not have sufficient securities in their demat account to deliver by the settlement deadline.",
+    "root_cause": "The counterparty's sell position exceeded their actual holdings, possibly due to: (a) a failed buy trade that was supposed to fund this delivery, (b) securities locked for pledge/margin, (c) a booking error where the same securities were committed to multiple obligations.",
+    "resolution": "Trigger the auction/close-out workflow per NSE Clearing rules. Compute valuation debit against the defaulting member. Initiate buy-in auction on T+1 day. Notify the buyer of the expected T+2 delivery delay.",
+    "prevention": "Implement pre-settlement holding checks against the counterparty's demat balance. Flag counterparties with a history of short deliveries in the risk scorecard.",
+    "frequency": "Low (~7% of breaks) but high impact — triggers the full auction machinery."
+  },
+  {
+    "id": "KB-010",
+    "title": "Counterparty Fail — Funds Shortfall on Buy-Side",
+    "category": "COUNTERPARTY_FAIL",
+    "description": "The buying counterparty did not have sufficient funds in their settlement bank account to meet the pay-in obligation.",
+    "root_cause": "The counterparty's trading activity exceeded their available cash margin. The funds were expected from a concurrent sell settlement that itself failed, creating a cascading fail.",
+    "resolution": "Contact the counterparty's treasury desk for immediate funding. If funds cannot be arranged, the clearing corporation may close out the position. Apply the penalty as per the clearing corporation's rules.",
+    "prevention": "Pre-settlement funding check against the counterparty's available balance. Implement intraday liquidity monitoring for high-activity counterparties.",
+    "frequency": "Low — most fund shortfalls are resolved intraday before the pay-in deadline."
+  },
+  {
+    "id": "KB-011",
+    "title": "Corporate Action Conflict — Ex-Date Between Trade and Settlement",
+    "category": "CORPORATE_ACTION_CONFLICT",
+    "description": "A dividend, split, or bonus issue has an ex-date falling between the trade date and settlement date, creating entitlement ambiguity.",
+    "root_cause": "When a corporate action's ex-date falls between T and T+1 (or T and T+2 for auction settlements), the economic entitlement belongs to the buyer but the shares are still held by the seller on the record date. This creates a market claim that must be tracked separately.",
+    "resolution": "Check the corporate actions calendar. Identify the entitled party. Generate a market claim for the dividend/bonus amount. Track the claim separately from the main obligation.",
+    "prevention": "Cross-reference open obligations against the corporate actions calendar before settlement. Flag any obligation where the settlement date straddles an ex-date.",
+    "frequency": "Low (~3% of breaks) — seasonal, peaks during dividend seasons (Q1/Q3 for Indian markets)."
+  },
+  {
+    "id": "KB-012",
+    "title": "SSI Mismatch — Bank Account Number Formatting",
+    "category": "SSI_MISSING_OR_INCORRECT",
+    "description": "The SSI record has a bank account number that does not match the format expected by the settlement bank — leading zeros stripped, spaces included, or IFSC code appended.",
+    "root_cause": "Different systems store bank account numbers in different formats. A system migration or data entry error introduced a formatting discrepancy that passes basic validation but fails at the settlement bank.",
+    "resolution": "Normalize the account number format. Contact the settlement bank to verify the correct format. Update the SSI golden copy with the bank-verified format.",
+    "prevention": "Implement strict account number format validation in the SSI module (per bank formatting rules). Run periodic format audits against the settlement banks.",
+    "frequency": "Low but recurring — accounts for ~5% of SSI-related breaks."
+  },
+  {
+    "id": "KB-013",
+    "title": "Quantity Mismatch — Exchange Trade Cancellation",
+    "category": "QUANTITY_MISMATCH",
+    "description": "An exchange-level trade cancellation (by the exchange surveillance team) reduced the total quantity, but the OMS was not updated before the netting engine ran.",
+    "root_cause": "NSE/BSE can cancel trades identified as erroneous by the surveillance mechanism. The cancellation notification may arrive after the end-of-day OMS snapshot was taken, causing the cancelled trade's quantity to still be included in the netting calculation.",
+    "resolution": "Check the exchange trade cancellation log. Remove the cancelled trade from the trade ledger. Recompute the net obligation. Notify the counterparty of the revised obligation.",
+    "prevention": "Subscribe to real-time trade cancellation feeds from the exchange. Delay the netting cut-off until after the surveillance window closes.",
+    "frequency": "Rare — but when it occurs, can affect multiple obligations for the same ISIN."
+  },
+  {
+    "id": "KB-014",
+    "title": "Price Mismatch — Auction Trade Priced Differently",
+    "category": "PRICE_MISMATCH",
+    "description": "A buy-in auction trade was executed at a price significantly different from the original obligation's VWAP, but the system compared them directly.",
+    "root_cause": "Auction trades follow different pricing rules (within ±20% band of reference price). The matching engine should not compare auction trade prices against the original obligation's VWAP — they are separate obligations.",
+    "resolution": "Verify that the price difference is due to an auction fill. If confirmed, this is expected behavior — do not treat as a break. Update the obligation to reflect the auction price.",
+    "prevention": "Tag auction-sourced obligations distinctly in the system. Exclude auction obligations from the standard price matching tolerance check.",
+    "frequency": "Low — only occurs when auction fills are processed through the standard matching pipeline."
+  },
+  {
+    "id": "KB-015",
+    "title": "Late Confirmation — T+0 Settlement Timing Pressure",
+    "category": "LATE_CONFIRMATION",
+    "description": "Under the T+0 settlement cycle, the confirmation window is extremely tight (within trading hours on trade day), leaving insufficient time for custodian operations to process the confirmation.",
+    "root_cause": "T+0 settlement requires same-day confirmation, but institutional trade workflows (FPI compliance, NAV calculations, order allocation) were designed for T+1 timelines. The compressed window causes systematic late confirmations for custodians not yet adapted to T+0.",
+    "resolution": "For T+0 trades, proactively contact the custodian's operations desk within 30 minutes of trade execution. Use pre-agreed confirmation templates to minimize processing time. Escalate to the custodian's management if the confirmation cutoff is approaching.",
+    "prevention": "Limit T+0 settlement to counterparties with proven same-day confirmation capability. Pre-clear T+0 eligibility with custodians during onboarding.",
+    "frequency": "Expected to be high during T+0 rollout — will decrease as custodians adapt their workflows."
+  }
+]

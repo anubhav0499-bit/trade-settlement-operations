@@ -1,0 +1,23 @@
+# Custodian confirmation cutoff times
+# Per NSE Clearing published deadlines
+
+t1_cycle:
+  # T+1 institutional trades: custodian must confirm by 1:00 PM on settlement day (T+1)
+  confirmation_cutoff_time: "13:00"
+  # Offset from settlement_date (not trade_date): 0 means cutoff is on settlement day
+  confirmation_cutoff_day_offset: 0
+
+t0_cycle:
+  # T+0 with upfront margin: custodian must confirm within trading hours on T day (= settlement day)
+  confirmation_cutoff_time: "15:30"   # market close on T day
+  confirmation_cutoff_day_offset: 0   # same day
+  # T+0 block mechanism (non-custodial) pay-in deadline: 1:45 PM on T day
+  payin_deadline_time: "13:45"
+  payin_deadline_day_offset: 0
+
+# Auction parameters
+auction:
+  price_band_pct: 20.0              # ±20% around reference closing price
+  auction_day_offset_t1: 1          # auction on T+1 day (for T+1 settlement)
+  auction_settlement_offset: 1      # auction settles next day (T+2)
+  close_out_premium_pct: 20.0       # 20% above closing price if auction fails

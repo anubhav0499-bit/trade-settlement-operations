@@ -1,0 +1,44 @@
+# Escalation matrix for break severity and aging
+# Separate thresholds for T+1 and T+0 settlement cycles
+
+t1_cycle:
+  aging_thresholds:
+    - max_age_days: 1
+      min_severity: null        # severity determined by break value
+      escalation_level: 0       # normal
+    - max_age_days: 3
+      min_severity: MEDIUM      # auto-bump if below
+      escalation_level: 1       # escalated
+    - max_age_days: null         # 4+ days
+      min_severity: HIGH
+      escalation_level: 2       # critical
+
+t0_cycle:
+  aging_thresholds:
+    - max_age_hours: 4
+      min_severity: null
+      escalation_level: 0
+    - max_age_hours: 8
+      min_severity: MEDIUM
+      escalation_level: 1
+    - max_age_hours: null        # 8+ hours
+      min_severity: HIGH
+      escalation_level: 2
+
+# Value-at-risk severity bands (used for all break types EXCEPT LATE_CONFIRMATION)
+value_at_risk_severity:
+  low_max: 500000               # up to 5 lakh INR
+  medium_max: 2500000           # up to 25 lakh INR
+  # above medium_max = HIGH
+
+# LATE_CONFIRMATION uses time-past-cutoff, not value-at-risk
+late_confirmation_severity:
+  low_max_minutes: 30           # 0-30 min past cutoff
+  medium_max_minutes: 120       # 30 min - 2 hours past cutoff
+  # above medium_max_minutes = HIGH
+
+# Cost-of-exception model (INR per break per day, by severity)
+cost_per_break:
+  LOW: 5000
+  MEDIUM: 15000
+  HIGH: 50000

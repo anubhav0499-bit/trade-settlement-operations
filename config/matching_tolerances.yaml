@@ -1,0 +1,12 @@
+# Matching engine tolerances
+# Applied when comparing internal net obligation vs counterparty net obligation
+
+price_tolerance_pct: 0.5       # ±0.5% VWAP tolerance
+quantity_tolerance_abs: 0       # exact match on net quantity (no tolerance)
+
+# Match keys (all must match for MATCHED status):
+#   - ISIN (exact)
+#   - net_quantity (exact)
+#   - vwap_price (within tolerance)
+#   - settlement_date (exact)
+#   - counterparty_id (exact)

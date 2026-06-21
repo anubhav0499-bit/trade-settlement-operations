@@ -1,0 +1,16 @@
+counterparty_id,name,counterparty_type,exchange_membership,is_active
+BRK-001,Zerodha Securities,BROKER,BOTH,1
+BRK-002,ICICI Securities,BROKER,BOTH,1
+BRK-003,HDFC Securities,BROKER,BOTH,1
+BRK-004,Kotak Securities,BROKER,NSE,1
+BRK-005,Motilal Oswal Securities,BROKER,BOTH,1
+BRK-006,Axis Securities,BROKER,BSE,1
+CUS-001,Deutsche Bank Custodial Services,CUSTODIAN,BOTH,1
+CUS-002,HSBC Custody & Clearing,CUSTODIAN,BOTH,1
+CUS-003,Standard Chartered Custody,CUSTODIAN,BOTH,1
+CUS-004,Citibank Custodial,CUSTODIAN,NSE,1
+CUS-005,BNP Paribas Custody,CUSTODIAN,BOTH,1
+NSCCL,NSE Clearing Corporation Ltd,CLEARING_CORP,NSE,1
+ICCL,Indian Clearing Corporation Ltd,CLEARING_CORP,BSE,1
+BC-001,SBI Cap Securities (Custodian),CUSTODIAN,BOTH,1
+BC-002,JP Morgan India Custody,CUSTODIAN,BOTH,1
