@@ -1,10 +1,10 @@
 # Trade Settlement Operations Agent
 
-Autonomous post-trade settlement operations system for NSE/BSE equity trades under T+1 (standard) and T+0 (phased rollout for top 500 stocks) settlement cycles.
+Autonomous post-trade settlement operations system for NSE/BSE equity trades under T+1 (standard) and T+0 (phased rollout for top 500 stocks) settlement cycles. Enhanced with industry-standard innovations: ML-based fail prediction, CSDR progressive penalties, ISO 20022 messaging, counterparty risk scorecards, and intraday liquidity monitoring.
 
 ## Architecture
 
-The system replicates the daily workflow of a settlements operations analyst through a 13-stage deterministic + agentic pipeline:
+The system replicates the daily workflow of a settlements operations analyst through a 16-stage deterministic + agentic pipeline:
 
 1. **Trade Capture & Normalization** — Ingests from 3 source formats (OMS, broker confirmation, custodian statement), normalizes into a canonical trade schema
 2. **Netting & Obligation Engine** — Multilateral netting at (ISIN, counterparty, settlement_date) grain with VWAP pricing, provisional + final stages
@@ -12,13 +12,17 @@ The system replicates the daily workflow of a settlements operations analyst thr
 4. **Matching Engine** — Two-way matching of internal vs counterparty net obligations with configurable price tolerance
 5. **Custodian Confirmation** — Tracking confirmation cutoffs per settlement cycle, flagging late confirmations
 6. **Settlement Instruction Generation** — SSI-enriched instructions for confirmed obligations
-7. **Break Detection & Classification** — Six-type taxonomy with cycle-aware escalation matrices
-8. **Auction & Close-Out** — Short delivery resolution per NSE/BSE clearing rules
-9. **Agentic Triage Pipeline** — LangGraph dual-path: fail-risk prediction (heuristic) + break triage (RAG-assisted)
-10. **Knowledge Base** — FAISS-indexed corpus of 15 break pattern documents for root-cause investigation
-11. **Position Reconciliation** — EOD position derivation from settled obligations vs custodian holdings
-12. **Reporting** — Multi-tab Excel + narrative DOCX with STP rate, cost-of-exception, counterparty analysis
-13. **Dashboard** — Streamlit app with break queue, human approval workflow, audit trail
+7. **ISO 20022 Message Formatting** — Structured XML messages in sese.023 format replacing legacy SWIFT MT540-543
+8. **Break Detection & Classification** — Six-type taxonomy with cycle-aware escalation matrices
+9. **CSDR Progressive Penalties** — Daily escalating cash penalties for settlement fails with counterparty billing
+10. **Auction & Close-Out** — Short delivery resolution per NSE/BSE clearing rules
+11. **ML Fail-Risk Prediction** — Gradient-boosted classifier (13 features) replacing simple heuristic scorer
+12. **Agentic Triage Pipeline** — LangGraph dual-path: fail-risk prediction + break triage (RAG-assisted)
+13. **Counterparty Risk Scorecards** — Composite scoring across 5 dimensions with letter grades and exposure limits
+14. **Intraday Liquidity Monitor** — Real-time settlement flow tracking with programmable alerts
+15. **Position Reconciliation** — EOD position derivation from settled obligations vs custodian holdings
+16. **Reporting** — Multi-tab Excel + narrative DOCX with STP rate, cost-of-exception, counterparty analysis
+17. **Dashboard** — Enhanced Streamlit app with 8 tabs: breaks, analysis, ML risk, scorecards, penalties, liquidity, audit, recon
 
 ## Quick Start
 
@@ -43,11 +47,11 @@ pytest tests/ -v
 ```
 trade_settlement/
 ├── config/                     # YAML configuration
-│   ├── escalation_matrix.yaml  # Severity & aging thresholds
+│   ├── escalation_matrix.yaml  # Severity & aging thresholds + CSDR penalty rates
 │   ├── matching_tolerances.yaml
 │   └── confirmation_cutoffs.yaml
 ├── data/
-│   ├── generated/              # Synthetic CSVs, SQLite DB, reports
+│   ├── generated/              # Synthetic CSVs, SQLite DB, reports, ML model
 │   └── knowledge_base/         # Break pattern corpus + FAISS index
 ├── src/
 │   ├── models/                 # SQLAlchemy schemas + enums
@@ -56,17 +60,20 @@ trade_settlement/
 │   ├── ssi/                    # SSI golden-copy validation
 │   ├── matching/               # Two-way matching engine
 │   ├── confirmation/           # Custodian confirmation tracking
-│   ├── instruction/            # Settlement instruction generation
+│   ├── instruction/            # Settlement instruction + ISO 20022 formatter
 │   ├── breaks/                 # Break detection rules engine
+│   ├── penalties/              # CSDR progressive cash penalty calculator
 │   ├── auction/                # Auction & close-out workflow
-│   ├── triage/                 # LangGraph pipeline + FAISS KB
+│   ├── triage/                 # LangGraph pipeline + FAISS KB + ML fail predictor
+│   ├── risk/                   # Counterparty risk scorecard
+│   ├── liquidity/              # Intraday liquidity monitor
 │   ├── reconciliation/         # EOD position reconciliation
 │   ├── reporting/              # Excel + DOCX report generation
 │   └── utils/                  # Config loader, shared helpers
 ├── generators/                 # Synthetic data generator
 ├── tests/                      # pytest unit tests (45 tests)
-├── dashboard/                  # Streamlit app
-├── main.py                     # Pipeline orchestrator
+├── dashboard/                  # Enhanced Streamlit app (8 tabs)
+├── main.py                     # 16-stage pipeline orchestrator
 └── requirements.txt
 ```
 
@@ -232,9 +239,106 @@ This is not a debugging tool — it is a governance artifact. Financial institut
 - Netting and obligation computation (arithmetic)
 - Break detection and classification (rules engine)
 - Severity and escalation assessment (config-driven thresholds)
-- Fail-risk scoring (weighted heuristic model)
+- Fail-risk scoring (ML model — deterministic inference)
 - Custodian confirmation tracking (deadline comparison)
 - Auction/close-out calculations (formula-based)
 - Position reconciliation (quantity comparison)
+- CSDR penalty computation (formula-based)
+- ISO 20022 message formatting (template-based)
+- Counterparty risk scoring (weighted composite)
+- Intraday liquidity monitoring (arithmetic)
 
 The boundary is intentional: numeric comparison, matching, and financial calculations must be deterministic and auditable. LLM reasoning is reserved for tasks that require natural-language understanding, pattern recognition across unstructured precedents, or human-readable output generation.
+
+---
+
+## Industry Enhancements
+
+### ML-Based Fail Prediction
+
+Replaces the original 5-factor weighted heuristic scorer with a Gradient Boosted Classifier (sklearn GBM, 100 estimators, max depth 4) trained on 5,000 synthetic historical settlement records.
+
+**13-dimensional feature vector:**
+
+| # | Feature | Source |
+|---|---------|--------|
+| 1 | Counterparty 90-day fail rate | Rolling statistics |
+| 2 | Counterparty fail count | Rolling statistics |
+| 3 | Is T+0 settlement | Obligation |
+| 4 | Log net obligation value | Obligation |
+| 5 | Net quantity | Obligation |
+| 6 | Days to settlement deadline | Calendar |
+| 7 | Obligation status ordinal | Pipeline state |
+| 8 | Security price level (volatility proxy) | Obligation |
+| 9 | Counterparty type ordinal | Reference data |
+| 10 | Hour of day | Clock (T+0 intraday) |
+| 11 | Is month-end | Calendar |
+| 12 | Concurrent obligations for counterparty | Pipeline state |
+| 13 | ISIN-level historical fail rate | Rolling statistics |
+
+The synthetic training data uses realistic distributions: ~3-5% overall fail rate, T+0 fails at ~2x T+1 rate, logistic label generation from a known feature-weight vector. The model outputs calibrated probabilities, not just risk tiers.
+
+**Why GBM over the original heuristic**: The heuristic used fixed weights and step-function scoring for each factor independently. GBM captures feature interactions (e.g., high-value T+0 obligations from a counterparty with poor history compound risk non-linearly), handles continuous features without manual bucketing, and provides feature importance for explainability.
+
+**Why not a neural network**: For 13 features and 5,000 training samples, GBM is the right tool. Neural networks would overfit and provide less interpretable feature importance. This aligns with industry practice — Accenture's production fail-prediction models use XGBoost/Random Forest for the same reasons.
+
+### CSDR Progressive Penalties
+
+Implements the Central Securities Depositories Regulation (EU 2022/1930, ESMA 70-156-5765) penalty framework adapted for Indian equity markets:
+
+| Day | Rate (liquid) | Rate (illiquid) | Multiplier |
+|-----|--------------|-----------------|------------|
+| 1-3 | 1.0 bps/day | 0.5 bps/day | 1x |
+| 4-7 | 2.0 bps/day | 1.0 bps/day | 2x |
+| 8+ | 3.0 bps/day | 1.5 bps/day | 3x |
+
+- Fails-to-deliver (PAY_IN direction) attract a 1.5x multiplier over fails-to-receive
+- Penalties computed on settlement value, accruing daily from settlement date + 1
+- Monthly aggregation per counterparty for billing
+- Three penalty tiers: STANDARD (days 1-3), ESCALATED (days 4-7), CRITICAL (8+)
+
+### ISO 20022 Settlement Messages
+
+Generates structured XML messages in the `sese.023.001.09` (Securities Settlement Transaction Instruction) format, replacing legacy SWIFT MT540-543 messages per the SWIFT MT retirement timeline (Nov 2025).
+
+Key field mappings:
+- ISIN → `FinancialInstrumentIdentification`
+- DP ID → `SafekeepingAccount`
+- Settlement Bank → `CashSettlementParties` (mapped to BIC via lookup)
+- Direction → `SecuritiesMovementType` (DELI/RECE)
+- Depository → `PlaceOfSettlement` (NSDL: NSDLINBB, CDSL: CDSLINBB)
+
+### Counterparty Risk Scorecard
+
+Five-dimension composite risk scoring on a 0-100 scale:
+
+| Dimension | Weight | Scoring |
+|-----------|--------|---------|
+| Settlement Efficiency | 25% | STP rate for the counterparty |
+| Fail History | 25% | 90-day fail rate (0% = 100, 10%+ = 0) |
+| Break Frequency | 20% | Breaks per 100 obligations |
+| Timeliness | 15% | % of custodian confirmations before cutoff |
+| Concentration Risk | 15% | Value-weighted Herfindahl index by ISIN |
+
+Grades and exposure-limit multipliers:
+
+| Grade | Score Range | Exposure Multiplier | Action |
+|-------|-----------|-------------------|--------|
+| A | 80-100 | 1.2x | Can increase exposure |
+| B | 65-79 | 1.0x | Normal |
+| C | 50-64 | 0.8x | Reduce exposure |
+| D | 35-49 | 0.5x | Restrict new trading |
+| F | 0-34 | 0.2x | Near-suspend |
+
+Counterparties graded D or F are placed on a watch list.
+
+### Intraday Liquidity Monitor
+
+Real-time tracking of settlement flows per CPMI-IOSCO PFMI principles:
+
+- **Liquidity snapshot**: Net fund position, gross pay-in/pay-out, buffer utilization
+- **Settlement velocity**: Obligations settled per hour in rolling windows
+- **Counterparty exposure**: Gross and net exposure per counterparty
+- **Programmable alerts**: Buffer breach (70% warning, 90% critical), single-counterparty concentration (>30%), velocity drops (>50% decline), settlement deadline proximity
+
+The liquidity buffer defaults to INR 50 crore — configurable per clearing member's actual collateral/margin with the clearing corporation.
