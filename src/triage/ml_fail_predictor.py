@@ -25,6 +25,7 @@ This is NOT LLM reasoning — it is a deterministic ML model.
 """
 
 import hashlib
+import hmac
 import math
 import pickle
 from dataclasses import dataclass, field
@@ -39,6 +40,8 @@ from src.models.enums import CounterpartyType, ObligationStatus, SettlementCycle
 
 
 MODEL_PATH = Path("data/generated/fail_predictor_model.pkl")
+MODEL_HMAC_PATH = Path("data/generated/fail_predictor_model.hmac")
+_MODEL_SIGNING_KEY = b"trade-settlement-model-integrity-v1"
 FEATURE_NAMES = [
     "cp_fail_rate_90d",
     "cp_fail_count",
@@ -203,8 +206,13 @@ def _generate_synthetic_training_data(n_samples: int = 5000) -> tuple[np.ndarray
     return X, y
 
 
+def _compute_model_hmac(model_bytes: bytes) -> str:
+    """Compute HMAC-SHA256 digest for model integrity verification."""
+    return hmac.new(_MODEL_SIGNING_KEY, model_bytes, hashlib.sha256).hexdigest()
+
+
 def train_model() -> object:
-    """Train an XGBoost/GBM classifier on synthetic historical data."""
+    """Train a GBM classifier on synthetic historical data."""
     try:
         from sklearn.ensemble import GradientBoostingClassifier
     except ImportError:
@@ -223,18 +231,49 @@ def train_model() -> object:
     model.fit(X, y)
 
     MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
+    model_bytes = pickle.dumps(model)
+
     with open(MODEL_PATH, "wb") as f:
-        pickle.dump(model, f)
+        f.write(model_bytes)
+
+    digest = _compute_model_hmac(model_bytes)
+    with open(MODEL_HMAC_PATH, "w") as f:
+        f.write(digest)
 
     return model
 
 
 def load_model() -> object:
-    """Load the trained model, training it first if needed."""
-    if MODEL_PATH.exists():
-        with open(MODEL_PATH, "rb") as f:
-            return pickle.load(f)
-    return train_model()
+    """Load the trained model with HMAC integrity verification.
+
+    Refuses to load if the HMAC signature file is missing or does not
+    match — protects against tampered or injected pickle files.
+    """
+    if not MODEL_PATH.exists():
+        return train_model()
+
+    if not MODEL_HMAC_PATH.exists():
+        raise RuntimeError(
+            f"Model HMAC file missing at {MODEL_HMAC_PATH}. "
+            "Cannot verify model integrity — refusing to load. "
+            "Re-train the model with train_model() to regenerate."
+        )
+
+    with open(MODEL_PATH, "rb") as f:
+        model_bytes = f.read()
+
+    with open(MODEL_HMAC_PATH, "r") as f:
+        stored_hmac = f.read().strip()
+
+    computed_hmac = _compute_model_hmac(model_bytes)
+    if not hmac.compare_digest(stored_hmac, computed_hmac):
+        raise RuntimeError(
+            "Model integrity check FAILED — HMAC mismatch. "
+            "The model file may have been tampered with. "
+            "Re-train with train_model() to generate a trusted model."
+        )
+
+    return pickle.loads(model_bytes)
 
 
 def predict_fail_risk(

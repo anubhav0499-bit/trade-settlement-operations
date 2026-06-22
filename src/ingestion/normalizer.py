@@ -4,12 +4,18 @@ Trade Capture & Normalization Layer (§1).
 Ingests trade records from three simulated sources (OMS, Broker Confirmation,
 Custodian Statement), each with a different raw schema, and normalizes them
 into the canonical Trade schema for insertion into the unified trade ledger.
+
+Input validation: all records are validated at the system boundary before
+ORM object construction. Invalid records are logged and skipped rather
+than crashing the pipeline.
 """
 
 import csv
+import logging
+import re
 import uuid
 from datetime import datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from sqlalchemy.orm import Session
@@ -25,6 +31,51 @@ from src.models.enums import (
     SourceSystem,
 )
 
+logger = logging.getLogger(__name__)
+
+_ISIN_PATTERN = re.compile(r"^[A-Z]{2}[A-Z0-9]{9}[0-9]$")
+_MAX_PRICE = Decimal("999999.9999")
+_MAX_QUANTITY = 10_000_000
+
+
+class ValidationError(Exception):
+    pass
+
+
+def _validate_isin(isin: str, record_id: str) -> str:
+    isin = isin.strip()
+    if not _ISIN_PATTERN.match(isin):
+        raise ValidationError(f"Record {record_id}: invalid ISIN format '{isin}'")
+    return isin
+
+
+def _validate_quantity(raw: str, record_id: str) -> int:
+    try:
+        qty = int(raw)
+    except (ValueError, TypeError):
+        raise ValidationError(f"Record {record_id}: invalid quantity '{raw}'")
+    if qty <= 0 or qty > _MAX_QUANTITY:
+        raise ValidationError(f"Record {record_id}: quantity {qty} out of bounds (1-{_MAX_QUANTITY})")
+    return qty
+
+
+def _validate_price(raw: str, record_id: str) -> Decimal:
+    try:
+        price = Decimal(raw)
+    except (InvalidOperation, TypeError, ValueError):
+        raise ValidationError(f"Record {record_id}: invalid price '{raw}'")
+    if price <= 0 or price > _MAX_PRICE:
+        raise ValidationError(f"Record {record_id}: price {price} out of bounds")
+    return price
+
+
+def _validate_enum(enum_cls, raw: str, field_name: str, record_id: str):
+    try:
+        return enum_cls(raw)
+    except (ValueError, KeyError):
+        valid = [e.value for e in enum_cls]
+        raise ValidationError(f"Record {record_id}: invalid {field_name} '{raw}', expected one of {valid}")
+
 
 def _read_csv(filepath: Path) -> list[dict]:
     with open(filepath, "r", encoding="utf-8") as f:
@@ -32,27 +83,40 @@ def _read_csv(filepath: Path) -> list[dict]:
 
 
 def normalize_oms_trades(records: list[dict]) -> list[Trade]:
-    """OMS records are already close to canonical — direct mapping."""
+    """OMS records are already close to canonical — direct mapping with validation."""
     trades = []
     for r in records:
-        trades.append(Trade(
-            trade_id=r["trade_id"],
-            isin=r["isin"],
-            security_name=r["security_name"],
-            quantity=int(r["quantity"]),
-            price=Decimal(r["price"]),
-            trade_date=datetime.strptime(r["trade_date"], "%Y-%m-%d").date(),
-            settlement_date=datetime.strptime(r["settlement_date"], "%Y-%m-%d").date(),
-            settlement_cycle=SettlementCycle(r["settlement_cycle"]),
-            counterparty_id=r["counterparty_id"],
-            counterparty_type=CounterpartyType(r["counterparty_type"]),
-            exchange=Exchange(r["exchange"]),
-            buy_sell=BuySell(r["buy_sell"]),
-            currency=r["currency"],
-            source_system=SourceSystem.OMS,
-            segment=Segment(r.get("segment", "NORMAL")),
-            created_at=datetime.utcnow(),
-        ))
+        record_id = r.get("trade_id", "UNKNOWN")
+        try:
+            isin = _validate_isin(r["isin"], record_id)
+            qty = _validate_quantity(r["quantity"], record_id)
+            price = _validate_price(r["price"], record_id)
+            cycle = _validate_enum(SettlementCycle, r["settlement_cycle"], "settlement_cycle", record_id)
+            cp_type = _validate_enum(CounterpartyType, r["counterparty_type"], "counterparty_type", record_id)
+            exchange = _validate_enum(Exchange, r["exchange"], "exchange", record_id)
+            side = _validate_enum(BuySell, r["buy_sell"], "buy_sell", record_id)
+            segment = _validate_enum(Segment, r.get("segment", "NORMAL"), "segment", record_id)
+
+            trades.append(Trade(
+                trade_id=record_id,
+                isin=isin,
+                security_name=r["security_name"],
+                quantity=qty,
+                price=price,
+                trade_date=datetime.strptime(r["trade_date"], "%Y-%m-%d").date(),
+                settlement_date=datetime.strptime(r["settlement_date"], "%Y-%m-%d").date(),
+                settlement_cycle=cycle,
+                counterparty_id=r["counterparty_id"],
+                counterparty_type=cp_type,
+                exchange=exchange,
+                buy_sell=side,
+                currency=r["currency"],
+                source_system=SourceSystem.OMS,
+                segment=segment,
+                created_at=datetime.utcnow(),
+            ))
+        except (ValidationError, KeyError, ValueError) as e:
+            logger.warning("Skipping invalid OMS record %s: %s", record_id, e)
     return trades
 
 
@@ -61,27 +125,41 @@ def normalize_broker_confirmations(records: list[dict]) -> list[Trade]:
     side_map = {"B": BuySell.BUY, "S": BuySell.SELL}
     trades = []
     for r in records:
-        trade_date = datetime.strptime(r["TradeDay"], "%d-%b-%Y").date()
-        settlement_date = datetime.strptime(r["SettleDay"], "%d-%b-%Y").date()
+        record_id = r.get("TradeRef", "UNKNOWN")
+        try:
+            isin = _validate_isin(r["ISIN_Code"], record_id)
+            qty = _validate_quantity(r["Qty"], record_id)
+            price = _validate_price(r["Rate"], record_id)
+            cycle = _validate_enum(SettlementCycle, r["Cycle"], "Cycle", record_id)
+            exchange = _validate_enum(Exchange, r["Exchange_Code"], "Exchange_Code", record_id)
 
-        trades.append(Trade(
-            trade_id=r["TradeRef"],
-            isin=r["ISIN_Code"],
-            security_name=r["Scrip"].replace("_", " "),
-            quantity=int(r["Qty"]),
-            price=Decimal(r["Rate"]),
-            trade_date=trade_date,
-            settlement_date=settlement_date,
-            settlement_cycle=SettlementCycle(r["Cycle"]),
-            counterparty_id=r["BrokerCode"],
-            counterparty_type=CounterpartyType.BROKER,
-            exchange=Exchange(r["Exchange_Code"]),
-            buy_sell=side_map[r["Side"]],
-            currency=r["CCY"],
-            source_system=SourceSystem.BROKER_CONFIRM,
-            segment=Segment.NORMAL,
-            created_at=datetime.utcnow(),
-        ))
+            side_raw = r["Side"]
+            if side_raw not in side_map:
+                raise ValidationError(f"Record {record_id}: invalid Side '{side_raw}', expected B or S")
+
+            trade_date = datetime.strptime(r["TradeDay"], "%d-%b-%Y").date()
+            settlement_date = datetime.strptime(r["SettleDay"], "%d-%b-%Y").date()
+
+            trades.append(Trade(
+                trade_id=record_id,
+                isin=isin,
+                security_name=r["Scrip"].replace("_", " "),
+                quantity=qty,
+                price=price,
+                trade_date=trade_date,
+                settlement_date=settlement_date,
+                settlement_cycle=cycle,
+                counterparty_id=r["BrokerCode"],
+                counterparty_type=CounterpartyType.BROKER,
+                exchange=exchange,
+                buy_sell=side_map[side_raw],
+                currency=r["CCY"],
+                source_system=SourceSystem.BROKER_CONFIRM,
+                segment=Segment.NORMAL,
+                created_at=datetime.utcnow(),
+            ))
+        except (ValidationError, KeyError, ValueError) as e:
+            logger.warning("Skipping invalid broker record %s: %s", record_id, e)
     return trades
 
 
@@ -89,24 +167,35 @@ def normalize_custodian_statements(records: list[dict]) -> list[Trade]:
     """Custodian statements use a different schema and ID scheme."""
     trades = []
     for r in records:
-        trades.append(Trade(
-            trade_id=r["original_trade_ref"],
-            isin=r["isin"],
-            security_name=r["security_desc"],
-            quantity=int(r["qty"]),
-            price=Decimal(r["exec_price"]),
-            trade_date=datetime.strptime(r["trade_dt"], "%Y-%m-%d").date(),
-            settlement_date=datetime.strptime(r["settle_dt"], "%Y-%m-%d").date(),
-            settlement_cycle=SettlementCycle(r["cycle"]),
-            counterparty_id=r["custodian_code"],
-            counterparty_type=CounterpartyType.CUSTODIAN,
-            exchange=Exchange(r["exch"]),
-            buy_sell=BuySell(r["direction"]),
-            currency=r["ccy"],
-            source_system=SourceSystem.CUSTODIAN_STATEMENT,
-            segment=Segment.NORMAL,
-            created_at=datetime.utcnow(),
-        ))
+        record_id = r.get("original_trade_ref", "UNKNOWN")
+        try:
+            isin = _validate_isin(r["isin"], record_id)
+            qty = _validate_quantity(r["qty"], record_id)
+            price = _validate_price(r["exec_price"], record_id)
+            cycle = _validate_enum(SettlementCycle, r["cycle"], "cycle", record_id)
+            exchange = _validate_enum(Exchange, r["exch"], "exch", record_id)
+            side = _validate_enum(BuySell, r["direction"], "direction", record_id)
+
+            trades.append(Trade(
+                trade_id=record_id,
+                isin=isin,
+                security_name=r["security_desc"],
+                quantity=qty,
+                price=price,
+                trade_date=datetime.strptime(r["trade_dt"], "%Y-%m-%d").date(),
+                settlement_date=datetime.strptime(r["settle_dt"], "%Y-%m-%d").date(),
+                settlement_cycle=cycle,
+                counterparty_id=r["custodian_code"],
+                counterparty_type=CounterpartyType.CUSTODIAN,
+                exchange=exchange,
+                buy_sell=side,
+                currency=r["ccy"],
+                source_system=SourceSystem.CUSTODIAN_STATEMENT,
+                segment=Segment.NORMAL,
+                created_at=datetime.utcnow(),
+            ))
+        except (ValidationError, KeyError, ValueError) as e:
+            logger.warning("Skipping invalid custodian record %s: %s", record_id, e)
     return trades
 
 
