@@ -1,0 +1,59 @@
+version: "3.9"
+
+services:
+  # ── One-shot pipeline run ──────────────────────────────────────────────
+  pipeline:
+    build:
+      context: .
+      target: pipeline
+    container_name: settle-pipeline
+    env_file: .env
+    environment:
+      SETTLE_LOG_FORMAT: json
+      SETTLE_DATA_DIR: /app/data/generated
+    volumes:
+      - pipeline-data:/app/data/generated
+      - kb-data:/app/data/knowledge_base
+    restart: "no"
+    stop_grace_period: 30s
+
+  # ── Streamlit dashboard (long-running) ─────────────────────────────────
+  dashboard:
+    build:
+      context: .
+      target: dashboard
+    container_name: settle-dashboard
+    env_file: .env
+    environment:
+      SETTLE_LOG_FORMAT: json
+      SETTLE_DATA_DIR: /app/data/generated
+    ports:
+      - "${SETTLE_DASHBOARD_PORT:-8501}:8501"
+    volumes:
+      - pipeline-data:/app/data/generated:ro
+      - kb-data:/app/data/knowledge_base:ro
+    depends_on:
+      pipeline:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    stop_grace_period: 10s
+    healthcheck:
+      test: ["CMD", "python", "-c",
+        "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+
+  # ── Test runner ────────────────────────────────────────────────────────
+  test:
+    build:
+      context: .
+      target: test
+    container_name: settle-tests
+    profiles: ["test"]
+    restart: "no"
+
+volumes:
+  pipeline-data:
+  kb-data:

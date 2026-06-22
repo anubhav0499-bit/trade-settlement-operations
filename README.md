@@ -32,14 +32,89 @@ pip install -r requirements.txt
 # Generate synthetic data (~1,000 trades, 20 trading days)
 python -m generators.synthetic_data
 
-# Run the full pipeline
-python main.py
+# Run the full pipeline (console logging)
+SETTLE_LOG_FORMAT=console python -m main
 
 # Launch the dashboard
 streamlit run dashboard/app.py
 
 # Run tests
 pytest tests/ -v
+```
+
+## Production Deployment
+
+### Docker
+
+The system ships with a multi-stage Dockerfile (non-root user, slim base image) and docker-compose for full-stack deployment:
+
+```bash
+# Build and run pipeline → dashboard
+docker compose up --build
+
+# Run only the pipeline
+docker compose run --rm pipeline
+
+# Run tests in a container
+docker compose run --rm test
+
+# Tear down
+docker compose down -v
+```
+
+The dashboard container includes health checks (`/_stcore/health`) compatible with Kubernetes liveness/readiness probes.
+
+### Configuration (12-Factor)
+
+All settings are sourced from environment variables with sensible defaults. Copy `.env.example` to `.env` and adjust:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SETTLE_DATABASE_URL` | `sqlite:///...` | Database connection string (SQLite or PostgreSQL) |
+| `SETTLE_LOG_LEVEL` | `INFO` | Logging level |
+| `SETTLE_LOG_FORMAT` | `json` | `json` for production, `console` for development |
+| `SETTLE_ML_RISK_THRESHOLD` | `0.3` | ML fail probability threshold |
+| `SETTLE_ENABLE_ML` | `true` | Toggle ML prediction module |
+| `SETTLE_ENABLE_CSDR` | `true` | Toggle CSDR penalty module |
+| `SETTLE_ENABLE_ISO20022` | `true` | Toggle ISO 20022 formatting |
+| `SETTLE_DASHBOARD_PORT` | `8501` | Dashboard port |
+
+See `.env.example` for the full list.
+
+### Structured Logging
+
+All pipeline output is structured JSON (structlog) in production — machine-parseable by ELK, Datadog, CloudWatch, or Loki:
+
+```json
+{"event": "step.complete", "step": 4, "name": "matching", "matched": 867, "breaks": 58, "timestamp": "2026-06-22T13:10:52Z"}
+```
+
+Set `SETTLE_LOG_FORMAT=console` for coloured, human-readable output during development.
+
+### Resilience
+
+- **Graceful shutdown**: The pipeline handles `SIGTERM`/`SIGINT` and drains cleanly between steps — safe for container orchestration
+- **Circuit breaker + retry**: Knowledge base queries and ML model loading are wrapped with exponential back-off and a circuit breaker (configurable threshold/timeout)
+- **Feature flags**: Each industry enhancement (ML, CSDR, ISO 20022, liquidity, scorecards) can be individually disabled without code changes
+
+### CI/CD
+
+GitHub Actions workflow (`.github/workflows/ci.yml`) runs on every push:
+1. **Test** — pytest across Python 3.12 and 3.13
+2. **Lint** — ruff static analysis
+3. **Docker** — build verification for pipeline, dashboard, and test targets
+
+### Makefile
+
+```bash
+make help          # Show available commands
+make run           # Run pipeline (console logging)
+make dashboard     # Launch Streamlit dashboard
+make test          # Run test suite
+make lint          # Run ruff linter
+make docker-build  # Build all Docker images
+make docker-up     # Run pipeline → dashboard
+make clean         # Remove generated artifacts
 ```
 
 ## Project Structure
@@ -55,7 +130,7 @@ trade_settlement/
 │   └── knowledge_base/         # Break pattern corpus + FAISS index
 ├── src/
 │   ├── models/                 # SQLAlchemy schemas + enums
-│   ├── ingestion/              # Trade capture & normalization
+│   ├── ingestion/              # Trade capture & normalization (with boundary validation)
 │   ├── netting/                # Obligation engine (VWAP, prov/final)
 │   ├── ssi/                    # SSI golden-copy validation
 │   ├── matching/               # Two-way matching engine
@@ -69,10 +144,17 @@ trade_settlement/
 │   ├── liquidity/              # Intraday liquidity monitor
 │   ├── reconciliation/         # EOD position reconciliation
 │   ├── reporting/              # Excel + DOCX report generation
-│   └── utils/                  # Config loader, shared helpers
+│   ├── utils/                  # Config loader, resilience (retry + circuit breaker)
+│   ├── settings.py             # 12-factor environment configuration
+│   └── logging_config.py       # Structured logging (structlog JSON/console)
 ├── generators/                 # Synthetic data generator
 ├── tests/                      # pytest unit tests (45 tests)
 ├── dashboard/                  # Enhanced Streamlit app (8 tabs)
+├── .github/workflows/ci.yml   # GitHub Actions CI pipeline
+├── Dockerfile                  # Multi-stage build (pipeline / dashboard / test)
+├── docker-compose.yml          # Full-stack container orchestration
+├── Makefile                    # Development & deployment commands
+├── .env.example                # Environment variable template
 ├── main.py                     # 16-stage pipeline orchestrator
 └── requirements.txt
 ```

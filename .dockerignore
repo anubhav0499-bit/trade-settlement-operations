@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+.env
+*.db
+*.pkl
+*.hmac
+.git/
+.gitignore
+.github/
+*.md
+.vscode/
+.idea/

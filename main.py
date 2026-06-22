@@ -10,8 +10,8 @@ Execution order:
 6.  Generate settlement instructions
 7.  Format ISO 20022 messages (sese.023)
 8.  Detect breaks & classify
-9.  Compute CSDR progressive penalties
-10. Handle short deliveries (auction/close-out)
+9.  Handle short deliveries (auction/close-out)
+10. Compute CSDR progressive penalties
 11. Run ML fail-risk prediction
 12. Run agentic triage pipeline (dual-path)
 13. Compute counterparty risk scorecards
@@ -22,13 +22,26 @@ Execution order:
 
 import json
 import os
+import signal
 import sys
+import time
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
 
 from sqlalchemy.orm import Session
 
+from src.logging_config import get_logger, setup_logging
+from src.settings import (
+    DATA_DIR,
+    DATABASE_URL,
+    ENABLE_CSDR_PENALTIES,
+    ENABLE_ISO20022,
+    ENABLE_LIQUIDITY_MONITOR,
+    ENABLE_ML_PREDICTION,
+    ENABLE_SCORECARDS,
+    ML_RISK_THRESHOLD,
+)
 from src.models.database import (
     AgenticAuditLog,
     BreakRecord,
@@ -47,45 +60,66 @@ from src.models.enums import (
     SourceSystem,
 )
 
+logger = get_logger(__name__)
 
-DATA_DIR = Path("data/generated")
-DB_PATH = "data/generated/settlement.db"
+# ── Graceful shutdown ──────────────────────────────────────────────────────
+_shutdown_requested = False
+
+
+def _signal_handler(signum: int, frame) -> None:
+    global _shutdown_requested
+    sig_name = signal.Signals(signum).name
+    logger.warning("shutdown.requested", signal=sig_name)
+    _shutdown_requested = True
+
+
+def _check_shutdown(step: str) -> None:
+    if _shutdown_requested:
+        logger.info("shutdown.graceful", interrupted_at=step)
+        sys.exit(0)
 
 
 def run_pipeline():
-    print("=" * 70)
-    print("  TRADE SETTLEMENT OPERATIONS PIPELINE")
-    print("  Industry-Enhanced: ML Prediction | CSDR Penalties | ISO 20022")
-    print("=" * 70)
-    print()
+    setup_logging()
+    start_time = time.monotonic()
 
-    db_file = Path(DB_PATH)
-    if db_file.exists():
-        os.remove(db_file)
+    signal.signal(signal.SIGINT, _signal_handler)
+    signal.signal(signal.SIGTERM, _signal_handler)
 
-    engine = get_engine(DB_PATH)
+    logger.info("pipeline.start", version="1.0.0", database=DATABASE_URL)
+
+    # Resolve DB path from URL for SQLite
+    if DATABASE_URL.startswith("sqlite"):
+        db_path = DATABASE_URL.replace("sqlite:///", "")
+        db_file = Path(db_path)
+        if db_file.exists():
+            os.remove(db_file)
+        engine = get_engine(db_path)
+    else:
+        db_path = DATABASE_URL
+        engine = get_engine(db_path)
+
     create_tables(engine)
     session = get_session(engine)
 
     # ── Step 1: Ingest & Normalize ──────────────────────────────────────
-    print("[1/16] Trade Capture & Normalization")
+    logger.info("step.start", step=1, name="trade_capture")
     from src.ingestion.normalizer import ingest_all
-    ingest_all(DATA_DIR, DB_PATH)
-
+    ingest_all(DATA_DIR, db_path)
     total_trades = session.query(Trade).count()
-    print(f"  Total trades in ledger: {total_trades}")
-    print()
+    logger.info("step.complete", step=1, name="trade_capture", trades=total_trades)
+    _check_shutdown("step_1")
 
     # ── Step 2: Netting & Obligations ───────────────────────────────────
-    print("[2/16] Netting & Obligation Engine")
+    logger.info("step.start", step=2, name="netting")
     from src.netting.obligation_engine import compute_all_obligations, get_obligations_for_matching
     obligation_map = compute_all_obligations(session)
     total_obligations = session.query(Obligation).count()
-    print(f"  Total obligations computed: {total_obligations}")
-    print()
+    logger.info("step.complete", step=2, name="netting", obligations=total_obligations)
+    _check_shutdown("step_2")
 
     # ── Step 3: SSI Validation ──────────────────────────────────────────
-    print("[3/16] SSI Golden-Copy Validation")
+    logger.info("step.start", step=3, name="ssi_validation")
     from src.ssi.golden_copy import validate_all_obligations
 
     internal_obs = (
@@ -97,33 +131,29 @@ def run_pipeline():
         .all()
     )
     valid_obs, ssi_breaks = validate_all_obligations(session, internal_obs)
-    print(f"  SSI-validated obligations: {len(valid_obs)}")
-    print(f"  SSI breaks detected: {len(ssi_breaks)}")
-    print()
+    logger.info("step.complete", step=3, name="ssi_validation",
+                validated=len(valid_obs), ssi_breaks=len(ssi_breaks))
+    _check_shutdown("step_3")
 
     # ── Step 4: Matching Engine ─────────────────────────────────────────
-    print("[4/16] Matching Engine")
+    logger.info("step.start", step=4, name="matching")
     from src.matching.engine import match_obligations, create_break_records
 
     internal_final, broker_final, custodian_final = get_obligations_for_matching(session)
-    print(f"  Internal obligations: {len(internal_final)}")
-    print(f"  Broker obligations: {len(broker_final)}")
-    print(f"  Custodian obligations: {len(custodian_final)}")
-
     broker_results = match_obligations(internal_final, broker_final)
     matched_broker = sum(1 for r in broker_results if r.status == MatchStatus.MATCHED)
     broken_broker = sum(1 for r in broker_results if r.status == MatchStatus.BREAK)
     unmatched_broker = sum(1 for r in broker_results if r.status == MatchStatus.UNMATCHED)
 
-    print(f"  vs Broker: {matched_broker} matched, {broken_broker} breaks, {unmatched_broker} unmatched")
-
     ob_by_id = {ob.obligation_id: ob for ob in internal_final + broker_final}
     broker_break_records = create_break_records(session, broker_results, ob_by_id)
-    print(f"  Broker break records created: {len(broker_break_records)}")
-    print()
+    logger.info("step.complete", step=4, name="matching",
+                matched=matched_broker, breaks=broken_broker,
+                unmatched=unmatched_broker, break_records=len(broker_break_records))
+    _check_shutdown("step_4")
 
     # ── Step 5: Custodian Confirmation ──────────────────────────────────
-    print("[5/16] Custodian Confirmation")
+    logger.info("step.start", step=5, name="confirmation")
     from src.confirmation.custodian_confirm import process_confirmations, simulate_confirmation_responses
 
     matched_obs = (
@@ -131,21 +161,19 @@ def run_pipeline():
         .filter(Obligation.status == ObligationStatus.MATCHED)
         .all()
     )
-    print(f"  Matched obligations for confirmation: {len(matched_obs)}")
-
     responses = simulate_confirmation_responses(matched_obs)
     current_time = datetime(2026, 6, 2, 12, 30)
 
     confirmed, problems, late_breaks = process_confirmations(
         session, matched_obs, responses, current_time
     )
-    print(f"  Confirmed: {len(confirmed)}")
-    print(f"  Late/rejected: {len(problems)}")
-    print(f"  Late confirmation breaks: {len(late_breaks)}")
-    print()
+    logger.info("step.complete", step=5, name="confirmation",
+                confirmed=len(confirmed), problems=len(problems),
+                late_breaks=len(late_breaks))
+    _check_shutdown("step_5")
 
     # ── Step 6: Settlement Instructions ─────────────────────────────────
-    print("[6/16] Settlement Instruction Generation")
+    logger.info("step.start", step=6, name="instructions")
     from src.instruction.settlement_instruction import generate_all_instructions
 
     confirmed_obs = (
@@ -154,34 +182,41 @@ def run_pipeline():
         .all()
     )
     instructions = generate_all_instructions(session, confirmed_obs)
-    print(f"  Instructions generated: {len(instructions)}")
-    print()
+    logger.info("step.complete", step=6, name="instructions", generated=len(instructions))
+    _check_shutdown("step_6")
 
     # ── Step 7: ISO 20022 Message Formatting ────────────────────────────
-    print("[7/16] ISO 20022 Message Formatting (sese.023)")
-    from src.instruction.iso20022_formatter import format_batch, get_message_summary
-
-    iso_messages = format_batch(instructions)
-    msg_summary = get_message_summary(iso_messages)
-    print(f"  ISO 20022 messages generated: {msg_summary['total_messages']}")
-    print(f"  DELIVER instructions: {msg_summary['deliver_instructions']}")
-    print(f"  RECEIVE instructions: {msg_summary['receive_instructions']}")
-    print(f"  Format: {msg_summary['format']} ({msg_summary['message_type']})")
-    print()
+    iso_messages = []
+    msg_summary = {"total_messages": 0, "deliver_instructions": 0,
+                   "receive_instructions": 0, "format": "ISO 20022 XML",
+                   "message_type": "sese.023.001.09"}
+    if ENABLE_ISO20022:
+        logger.info("step.start", step=7, name="iso20022")
+        from src.instruction.iso20022_formatter import format_batch, get_message_summary
+        iso_messages = format_batch(instructions)
+        msg_summary = get_message_summary(iso_messages)
+        logger.info("step.complete", step=7, name="iso20022",
+                    messages=msg_summary["total_messages"],
+                    deliver=msg_summary["deliver_instructions"],
+                    receive=msg_summary["receive_instructions"])
+    else:
+        logger.info("step.skipped", step=7, name="iso20022", reason="disabled")
+    _check_shutdown("step_7")
 
     # ── Step 8: Break Detection & Classification ────────────────────────
-    print("[8/16] Break Detection & Classification")
+    logger.info("step.start", step=8, name="break_detection")
     from src.breaks.rules_engine import update_break_aging, get_break_summary
 
     updated_breaks = update_break_aging(session, current_time)
     summary = get_break_summary(session)
-    print(f"  Total breaks: {summary['total']}")
-    print(f"  By type: {json.dumps(summary['by_type'], indent=4)}")
-    print(f"  By severity: {json.dumps(summary['by_severity'], indent=4)}")
-    print()
+    logger.info("step.complete", step=8, name="break_detection",
+                total_breaks=summary["total"],
+                by_type=summary["by_type"],
+                by_severity=summary["by_severity"])
+    _check_shutdown("step_8")
 
     # ── Step 9: Auction / Close-out ────────────────────────────────────
-    print("[9/16] Auction & Close-Out (simulated)")
+    logger.info("step.start", step=9, name="auction")
     from src.auction.close_out import detect_short_deliveries, initiate_auction, execute_auction
 
     instructed_obs = (
@@ -200,7 +235,7 @@ def run_pipeline():
         ob.status = ObligationStatus.FAILED
     session.commit()
 
-    print(f"  Simulated short deliveries: {len(shorts)}")
+    auction_results = []
     for ob in shorts:
         auction = initiate_auction(
             session, ob,
@@ -214,7 +249,7 @@ def run_pipeline():
                 closing_price_auction_day=Decimal(str(ob.vwap_price)),
                 highest_price_trade_to_auction=Decimal(str(ob.vwap_price)) * Decimal("1.05"),
             )
-            print(f"    {ob.isin}: Auction SUCCESS")
+            auction_results.append({"isin": ob.isin, "outcome": "AUCTION_SUCCESS"})
         else:
             execute_auction(
                 session, auction,
@@ -222,85 +257,90 @@ def run_pipeline():
                 closing_price_auction_day=Decimal(str(ob.vwap_price)),
                 highest_price_trade_to_auction=Decimal(str(ob.vwap_price)) * Decimal("1.03"),
             )
-            print(f"    {ob.isin}: CLOSED OUT")
-    print()
+            auction_results.append({"isin": ob.isin, "outcome": "CLOSED_OUT"})
+
+    logger.info("step.complete", step=9, name="auction",
+                short_deliveries=len(shorts), results=auction_results)
+    _check_shutdown("step_9")
 
     # ── Step 10: CSDR Progressive Penalties ─────────────────────────────
-    print("[10/16] CSDR Progressive Cash Penalties")
-    from src.penalties.csdr_penalties import (
-        compute_penalties_batch,
-        aggregate_by_counterparty,
-        get_penalty_summary,
-    )
-
-    failed_obs = (
-        session.query(Obligation)
-        .filter(
-            Obligation.obligation_stage == ObligationStage.FINAL,
-            Obligation.status.in_([
-                ObligationStatus.FAILED,
-                ObligationStatus.AUCTION,
-                ObligationStatus.CLOSED_OUT,
-            ]),
+    penalty_assessments = []
+    if ENABLE_CSDR_PENALTIES:
+        logger.info("step.start", step=10, name="csdr_penalties")
+        from src.penalties.csdr_penalties import (
+            compute_penalties_batch,
+            aggregate_by_counterparty,
+            get_penalty_summary,
         )
-        .all()
-    )
 
-    if failed_obs:
-        assessment_date = date(2026, 6, 5)
-        fail_pairs = [(ob, ob.settlement_date) for ob in failed_obs]
-        penalty_assessments = compute_penalties_batch(fail_pairs, assessment_date)
-        penalty_summary = get_penalty_summary(penalty_assessments)
-        cp_penalties = aggregate_by_counterparty(penalty_assessments)
+        failed_obs = (
+            session.query(Obligation)
+            .filter(
+                Obligation.obligation_stage == ObligationStage.FINAL,
+                Obligation.status.in_([
+                    ObligationStatus.FAILED,
+                    ObligationStatus.AUCTION,
+                    ObligationStatus.CLOSED_OUT,
+                ]),
+            )
+            .all()
+        )
 
-        print(f"  Failed obligations assessed: {penalty_summary['total_fails']}")
-        print(f"  Total penalties: INR {float(penalty_summary['total_penalties']):,.2f}")
-        print(f"  By tier: {penalty_summary['by_tier']}")
-        print(f"  By direction: {penalty_summary['by_direction']}")
+        if failed_obs:
+            assessment_date = date(2026, 6, 5)
+            fail_pairs = [(ob, ob.settlement_date) for ob in failed_obs]
+            penalty_assessments = compute_penalties_batch(fail_pairs, assessment_date)
+            penalty_summary = get_penalty_summary(penalty_assessments)
+            cp_penalties = aggregate_by_counterparty(penalty_assessments)
+            logger.info("step.complete", step=10, name="csdr_penalties",
+                        assessed=penalty_summary["total_fails"],
+                        total_penalties=float(penalty_summary["total_penalties"]))
+        else:
+            logger.info("step.complete", step=10, name="csdr_penalties",
+                        assessed=0, total_penalties=0)
     else:
-        penalty_assessments = []
-        print("  No failed obligations to assess")
-    print()
+        logger.info("step.skipped", step=10, name="csdr_penalties", reason="disabled")
+    _check_shutdown("step_10")
 
     # ── Step 11: ML Fail-Risk Prediction ────────────────────────────────
-    print("[11/16] ML-Based Fail-Risk Prediction (Gradient Boosted Classifier)")
-    from src.triage.ml_fail_predictor import (
-        predict_fail_risk_batch,
-        get_ml_high_risk_queue,
-        train_model,
-    )
+    ml_scores = []
+    ml_high_risk = []
+    if ENABLE_ML_PREDICTION:
+        logger.info("step.start", step=11, name="ml_prediction")
+        from src.triage.ml_fail_predictor import (
+            predict_fail_risk_batch,
+            get_ml_high_risk_queue,
+            train_model,
+        )
 
-    print("  Training GBM model on synthetic historical data (5,000 samples)...")
-    ml_model = train_model()
+        ml_model = train_model()
 
-    ml_pending_obs = (
-        session.query(Obligation)
-        .filter(Obligation.status.in_([
-            ObligationStatus.PENDING,
-            ObligationStatus.SSI_VALIDATED,
-            ObligationStatus.CONFIRMED,
-            ObligationStatus.INSTRUCTED,
-        ]))
-        .limit(100)
-        .all()
-    )
+        ml_pending_obs = (
+            session.query(Obligation)
+            .filter(Obligation.status.in_([
+                ObligationStatus.PENDING,
+                ObligationStatus.SSI_VALIDATED,
+                ObligationStatus.CONFIRMED,
+                ObligationStatus.INSTRUCTED,
+            ]))
+            .limit(100)
+            .all()
+        )
 
-    ml_scores = predict_fail_risk_batch(ml_pending_obs, current_time)
-    ml_high_risk = get_ml_high_risk_queue(ml_scores, threshold=0.3)
+        ml_scores = predict_fail_risk_batch(ml_pending_obs, current_time)
+        ml_high_risk = get_ml_high_risk_queue(ml_scores, threshold=ML_RISK_THRESHOLD)
 
-    print(f"  Obligations scored: {len(ml_scores)}")
-    print(f"  High risk (>30% fail probability): {len(ml_high_risk)}")
-    if ml_scores:
-        avg_prob = sum(s.fail_probability for s in ml_scores) / len(ml_scores)
-        print(f"  Avg fail probability: {avg_prob:.1%}")
-        print(f"  Model version: {ml_scores[0].model_version}")
-    if ml_high_risk:
-        top = ml_high_risk[0]
-        print(f"  Highest risk: {top.obligation_id[:12]}... @ {top.fail_probability:.1%}")
-    print()
+        avg_prob = sum(s.fail_probability for s in ml_scores) / len(ml_scores) if ml_scores else 0
+        logger.info("step.complete", step=11, name="ml_prediction",
+                    scored=len(ml_scores), high_risk=len(ml_high_risk),
+                    avg_probability=round(avg_prob, 4),
+                    model_version=ml_scores[0].model_version if ml_scores else "N/A")
+    else:
+        logger.info("step.skipped", step=11, name="ml_prediction", reason="disabled")
+    _check_shutdown("step_11")
 
     # ── Step 12: Agentic Triage Pipeline ────────────────────────────────
-    print("[12/16] Agentic Triage Pipeline (LangGraph)")
+    logger.info("step.start", step=12, name="triage")
 
     pending_obs = (
         session.query(Obligation)
@@ -349,10 +389,8 @@ def run_pipeline():
             "settlement_cycle": ob.settlement_cycle.value if ob else "T1",
         })
 
-    print(f"  Path A input: {len(obligation_dicts)} obligations for fail-risk scan")
-    print(f"  Path B input: {len(break_dicts)} breaks for triage")
+    logger.info("triage.input", obligations=len(obligation_dicts), breaks=len(break_dicts))
 
-    print("  Building FAISS knowledge base index...")
     from src.triage.knowledge_base import build_index
     build_index()
 
@@ -362,80 +400,83 @@ def run_pipeline():
         breaks=break_dicts,
     )
 
-    print(f"  Path: {triage_result['path']}")
-    print(f"  Fail-risk scores computed: {len(triage_result['fail_risk_scores'])}")
-    print(f"  High-risk queue: {len(triage_result['high_risk_queue'])}")
-    print(f"  Triage results: {len(triage_result['triage_results'])}")
-    print(f"  Audit log entries: {len(triage_result['audit_logs'])}")
-
-    for log in triage_result["audit_logs"]:
+    for log_entry in triage_result["audit_logs"]:
         audit = AgenticAuditLog(
-            log_id=log["log_id"],
-            obligation_id=log.get("obligation_id"),
-            break_id=log.get("break_id"),
-            node_name=log["node_name"],
-            inputs=log["inputs"],
-            conclusion=log["conclusion"],
-            rationale=log["rationale"],
-            timestamp=datetime.fromisoformat(log["timestamp"]),
+            log_id=log_entry["log_id"],
+            obligation_id=log_entry.get("obligation_id"),
+            break_id=log_entry.get("break_id"),
+            node_name=log_entry["node_name"],
+            inputs=log_entry["inputs"],
+            conclusion=log_entry["conclusion"],
+            rationale=log_entry["rationale"],
+            timestamp=datetime.fromisoformat(log_entry["timestamp"]),
         )
         session.add(audit)
     session.commit()
-    print(f"  Persisted {len(triage_result['audit_logs'])} audit log entries")
-    print()
+
+    logger.info("step.complete", step=12, name="triage",
+                path=triage_result["path"],
+                risk_scores=len(triage_result["fail_risk_scores"]),
+                high_risk=len(triage_result["high_risk_queue"]),
+                triage_results=len(triage_result["triage_results"]),
+                audit_entries=len(triage_result["audit_logs"]))
+    _check_shutdown("step_12")
 
     # ── Step 13: Counterparty Risk Scorecards ───────────────────────────
-    print("[13/16] Counterparty Risk Scorecards")
-    from src.risk.counterparty_scorecard import (
-        compute_all_scorecards,
-        get_scorecard_summary,
-        get_watch_list,
-    )
+    scorecards = []
+    sc_summary = {"total": 0, "by_grade": {}, "avg_score": 0}
+    if ENABLE_SCORECARDS:
+        logger.info("step.start", step=13, name="scorecards")
+        from src.risk.counterparty_scorecard import (
+            compute_all_scorecards,
+            get_scorecard_summary,
+            get_watch_list,
+        )
 
-    cp_ids = list({
-        r[0] for r in
-        session.query(Obligation.counterparty_id)
-        .filter(Obligation.obligation_stage == ObligationStage.FINAL)
-        .distinct()
-        .all()
-    })
+        cp_ids = list({
+            r[0] for r in
+            session.query(Obligation.counterparty_id)
+            .filter(Obligation.obligation_stage == ObligationStage.FINAL)
+            .distinct()
+            .all()
+        })
 
-    scorecards = compute_all_scorecards(session, cp_ids, date(2026, 6, 2))
-    sc_summary = get_scorecard_summary(scorecards)
-    watch_list = get_watch_list(scorecards)
+        scorecards = compute_all_scorecards(session, cp_ids, date(2026, 6, 2))
+        sc_summary = get_scorecard_summary(scorecards)
+        watch_list = get_watch_list(scorecards)
 
-    print(f"  Counterparties rated: {sc_summary['total']}")
-    print(f"  Grade distribution: {sc_summary['by_grade']}")
-    print(f"  Average score: {sc_summary['avg_score']}/100")
-    print(f"  Watch list: {len(watch_list)} counterparties")
-    for sc in sorted(scorecards, key=lambda s: s.composite_score, reverse=True)[:5]:
-        print(f"    {sc.counterparty_id}: {sc.composite_score}/100 (Grade {sc.letter_grade})")
-    print()
+        logger.info("step.complete", step=13, name="scorecards",
+                    rated=sc_summary["total"],
+                    avg_score=sc_summary["avg_score"],
+                    watch_list=len(watch_list))
+    else:
+        logger.info("step.skipped", step=13, name="scorecards", reason="disabled")
+    _check_shutdown("step_13")
 
     # ── Step 14: Intraday Liquidity Monitoring ──────────────────────────
-    print("[14/16] Intraday Liquidity Monitoring")
-    from src.liquidity.intraday_monitor import generate_intraday_report
+    liquidity_report = None
+    if ENABLE_LIQUIDITY_MONITOR:
+        logger.info("step.start", step=14, name="liquidity")
+        from src.liquidity.intraday_monitor import generate_intraday_report
 
-    liquidity_report = generate_intraday_report(
-        session,
-        settlement_date=date(2026, 6, 2),
-        current_time=current_time,
-    )
+        liquidity_report = generate_intraday_report(
+            session,
+            settlement_date=date(2026, 6, 2),
+            current_time=current_time,
+        )
 
-    snap = liquidity_report.current_snapshot
-    print(f"  Net position: INR {float(snap.net_position):,.0f}")
-    print(f"  Gross pay-in: INR {float(snap.gross_pay_in):,.0f}")
-    print(f"  Gross pay-out: INR {float(snap.gross_pay_out):,.0f}")
-    print(f"  Buffer utilization: {snap.buffer_utilization:.1f}%")
-    print(f"  Settlement progress: {liquidity_report.settlement_progress:.1f}%")
-    print(f"  Active alerts: {len(liquidity_report.alerts)}")
-    for alert in liquidity_report.alerts:
-        print(f"    [{alert.severity}] {alert.alert_type}: {alert.message[:80]}")
-    print(f"  Counterparty exposures tracked: {len(liquidity_report.counterparty_exposures)}")
-    print()
+        snap = liquidity_report.current_snapshot
+        logger.info("step.complete", step=14, name="liquidity",
+                    net_position=float(snap.net_position),
+                    buffer_utilization=snap.buffer_utilization,
+                    alerts=len(liquidity_report.alerts),
+                    exposures=len(liquidity_report.counterparty_exposures))
+    else:
+        logger.info("step.skipped", step=14, name="liquidity", reason="disabled")
+    _check_shutdown("step_14")
 
     # ── Step 15: Reconciliation ─────────────────────────────────────────
-    print("[15/16] EOD Position Reconciliation")
+    logger.info("step.start", step=15, name="reconciliation")
     from src.reconciliation.position_recon import reconcile_positions, get_recon_summary
 
     settled_count = 0
@@ -446,14 +487,15 @@ def run_pipeline():
 
     recon_results = reconcile_positions(session, date(2026, 6, 2))
     recon_summary = get_recon_summary(recon_results)
-    print(f"  Positions compared: {recon_summary['total_positions']}")
-    print(f"  Reconciled: {recon_summary['reconciled']}")
-    print(f"  Unreconciled: {recon_summary['unreconciled']}")
-    print(f"  Recon rate: {recon_summary['recon_rate']:.1f}%")
-    print()
+    logger.info("step.complete", step=15, name="reconciliation",
+                positions=recon_summary["total_positions"],
+                reconciled=recon_summary["reconciled"],
+                unreconciled=recon_summary["unreconciled"],
+                recon_rate=recon_summary["recon_rate"])
+    _check_shutdown("step_15")
 
     # ── Step 16: Reporting ──────────────────────────────────────────────
-    print("[16/16] Report Generation")
+    logger.info("step.start", step=16, name="reporting")
     from src.reporting.report_generator import generate_reports
 
     generate_reports(
@@ -462,15 +504,10 @@ def run_pipeline():
         recon_results=recon_results,
         output_dir=DATA_DIR,
     )
+    logger.info("step.complete", step=16, name="reporting")
 
     # ── Final Summary ───────────────────────────────────────────────────
-    print()
-    print("=" * 70)
-    print("  PIPELINE COMPLETE — Industry-Enhanced")
-    print("=" * 70)
-
-    final_summary = get_break_summary(session)
-    total_obs = session.query(Obligation).filter(
+    total_final = session.query(Obligation).filter(
         Obligation.obligation_stage == ObligationStage.FINAL
     ).count()
     settled = session.query(Obligation).filter(
@@ -479,33 +516,28 @@ def run_pipeline():
     instructed = session.query(Obligation).filter(
         Obligation.status == ObligationStatus.INSTRUCTED
     ).count()
-
     stp_eligible = session.query(Obligation).filter(
         Obligation.obligation_stage == ObligationStage.FINAL,
         Obligation.status.in_([ObligationStatus.SETTLED, ObligationStatus.INSTRUCTED]),
     ).count()
-
-    total_final = session.query(Obligation).filter(
-        Obligation.obligation_stage == ObligationStage.FINAL
-    ).count()
-
     stp_rate = (stp_eligible / total_final * 100) if total_final > 0 else 0
 
-    print(f"  Total trades ingested: {total_trades}")
-    print(f"  Total obligations (final): {total_final}")
-    print(f"  Settled: {settled}")
-    print(f"  Instructed: {instructed}")
-    print(f"  STP rate: {stp_rate:.1f}%")
-    print(f"  Total breaks: {final_summary['total']}")
-    print(f"  Audit log entries: {session.query(AgenticAuditLog).count()}")
-    print()
-    print("  Industry Enhancements Active:")
-    print(f"    ML fail prediction: {len(ml_scores)} obligations scored")
-    print(f"    CSDR penalties: {len(penalty_assessments)} assessments")
-    print(f"    ISO 20022 messages: {msg_summary['total_messages']} sese.023 generated")
-    print(f"    Counterparty scorecards: {sc_summary['total']} rated (avg {sc_summary['avg_score']}/100)")
-    print(f"    Liquidity alerts: {len(liquidity_report.alerts)} active")
-    print()
+    elapsed = round(time.monotonic() - start_time, 2)
+
+    logger.info("pipeline.complete",
+                elapsed_seconds=elapsed,
+                total_trades=total_trades,
+                total_obligations=total_final,
+                settled=settled,
+                instructed=instructed,
+                stp_rate=round(stp_rate, 1),
+                total_breaks=summary["total"],
+                audit_entries=session.query(AgenticAuditLog).count(),
+                ml_scored=len(ml_scores),
+                penalties=len(penalty_assessments),
+                iso20022_messages=msg_summary["total_messages"],
+                scorecards=sc_summary["total"],
+                liquidity_alerts=len(liquidity_report.alerts) if liquidity_report else 0)
 
     session.close()
 

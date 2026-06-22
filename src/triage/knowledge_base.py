@@ -6,12 +6,18 @@ root-cause investigator node to retrieve relevant historical precedents.
 """
 
 import json
+import logging
 from pathlib import Path
 
 import faiss
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
+from src.utils.resilience import retry_with_backoff
+
+import structlog
+
+logger = structlog.get_logger(__name__)
 
 KB_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "knowledge_base"
 INDEX_PATH = KB_PATH / "faiss_index"
@@ -52,7 +58,7 @@ def build_index() -> tuple[faiss.IndexFlatL2, list[dict]]:
     with open(INDEX_PATH / "documents.json", "w") as f:
         json.dump(documents, f)
 
-    print(f"  Built FAISS index with {len(documents)} documents, dimension={dimension}")
+    logger.info("knowledge_base.index_built", documents=len(documents), dimension=dimension)
     return index, documents
 
 
@@ -70,6 +76,7 @@ def load_index() -> tuple[faiss.IndexFlatL2, list[dict]]:
     return build_index()
 
 
+@retry_with_backoff(breaker_name="knowledge_base", max_attempts=2, base_delay=0.5)
 def query_knowledge_base(
     query: str,
     top_k: int = 3,

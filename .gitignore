@@ -14,3 +14,5 @@ data/generated/fail_predictor_model.pkl
 data/generated/fail_predictor_model.hmac
 data/knowledge_base/faiss_index/
 .streamlit/
+.env
+!.env.example
