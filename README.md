@@ -1,6 +1,6 @@
-# Trade Settlement Operations Agent
+# Trade Settlement Operations System
 
-Autonomous post-trade clearing & settlement simulation covering NSE/BSE equity cash (T+1 standard, T+0 phased rollout for top 500 stocks), equity/currency/interest-rate derivatives, and corporate bond/G-Sec debt settlement. Enhanced with industry-standard innovations: ML-based fail prediction, CSDR progressive penalties, ISO 20022 messaging, counterparty risk scorecards, intraday liquidity monitoring, SPAN-style margining, multi-CM hierarchy, and SGF default waterfall simulation.
+Deterministic post-trade clearing & settlement simulation covering NSE/BSE equity cash (T+1 standard, T+0 phased rollout for top 500 stocks), equity/currency/interest-rate derivatives, and corporate bond/G-Sec debt settlement. Enhanced with industry-standard innovations: ML-based fail prediction, CSDR progressive penalties, ISO 20022 messaging, counterparty risk scorecards, intraday liquidity monitoring, SPAN-style margining, multi-CM hierarchy, and SGF default waterfall simulation.
 
 ## Documentation
 

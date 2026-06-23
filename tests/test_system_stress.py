@@ -10,7 +10,7 @@ import time
 import uuid
 import pytest
 from datetime import date, datetime, timedelta
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -56,11 +56,12 @@ from src.margins.var_model import ewma_volatility, compute_var_margin
 from src.margins.delivery_margin import record_delivery_margin
 from src.margins.cross_margin import compute_cross_margin_benefit, apply_cross_margin
 from src.margins.position_limits import (
-    check_market_wide_limit, check_cm_level_limit, check_client_level_limit,
+    check_market_wide_limit, check_cm_level_limit, check_client_level_limit, market_wide_limit,
 )
 from src.collateral.manager import (
     compute_effective_collateral, check_cash_rule, check_concentration_limit,
 )
+from src.utils.config_loader import get_margin_framework_config
 
 # Phase 4 — debt
 from src.debt.accrued_interest import compute_accrued_interest, day_count_fraction
@@ -70,7 +71,7 @@ from src.debt.sgf_contribution import compute_sgf_issuer_contribution
 from src.debt.gsec_integration import derive_gsec_positions, reconcile_ccil_positions
 
 # Phase 5 — advanced
-from src.cm_hierarchy.hierarchy import register_clearing_member, aggregate_obligations
+from src.cm_hierarchy.hierarchy import aggregate_obligations
 from src.sgf.waterfall import run_default_waterfall, WaterfallInputs, get_waterfall_summary
 from src.risk.stress_test import rank_top_n_stressed_cms
 from src.settlement.t0_engine import compute_t0_obligations
@@ -84,6 +85,13 @@ def db_session():
     session = sessionmaker(bind=engine)()
     yield session
     session.close()
+
+
+@pytest.fixture(autouse=True)
+def _reset_rng():
+    """Reseed the shared RNG before every test so draws are independent of
+    test execution order (pytest -k, pytest-xdist, reordering plugins)."""
+    RNG.seed(12345)
 
 
 # ── Constants ────────────────────────────────────────────────────────────────
@@ -105,7 +113,7 @@ def _bulk_trades(session, count, source=SourceSystem.OMS, rng=None):
     prefix = {"OMS": "", "BROKER_CONFIRM": "BRK-", "CUSTODIAN_STATEMENT": "CUS-"}.get(source.value, "")
     for i in range(count):
         trades.append(Trade(
-            trade_id=f"{prefix}STRESS-{uuid.uuid4().hex[:8]}",
+            trade_id=f"{prefix}STRESS-{i:06d}-{uuid.uuid4().hex[:8]}",
             isin=rng.choice(ISINS),
             security_name="STRESS",
             quantity=rng.randint(1, 5000),
@@ -205,26 +213,31 @@ def _seed_derivative_universe(session, num_underlyings=20, positions_per_contrac
 
 
 def _seed_cm_hierarchy(session, count=20):
-    """Build a multi-level CM hierarchy."""
-    # 4 parent TM-CMs
-    parents = []
+    """Build a multi-level CM hierarchy.
+
+    Builds ClearingMember rows directly (rather than calling
+    register_clearing_member in a loop) so this helper batches a single
+    commit like every other _seed_* helper in this file — register_clearing_member
+    commits internally on every call, which would otherwise mean count individual commits.
+    """
+    members = []
     for i in range(4):
-        cm = register_clearing_member(
-            session, f"CM-{i:03d}", f"Parent CM {i}", CMType.TM_CM,
-            Decimal(str(RNG.randint(10_000_000, 100_000_000))),
-            Decimal(str(RNG.randint(1_000_000, 10_000_000))),
-        )
-        parents.append(cm)
-    # Sub-CMs under each parent
+        members.append(ClearingMember(
+            cm_id=f"CM-{i:03d}", name=f"Parent CM {i}", cm_type=CMType.TM_CM,
+            net_worth=Decimal(str(RNG.randint(10_000_000, 100_000_000))),
+            security_deposit=Decimal(str(RNG.randint(1_000_000, 10_000_000))),
+        ))
     for i in range(4, count):
-        parent = parents[i % 4]
-        register_clearing_member(
-            session, f"CM-{i:03d}", f"Sub CM {i}",
-            RNG.choice([CMType.SCM, CMType.PCM]),
-            Decimal(str(RNG.randint(1_000_000, 10_000_000))),
-            Decimal(str(RNG.randint(100_000, 1_000_000))),
-            parent_cm_id=parent.cm_id,
-        )
+        parent_id = f"CM-{i % 4:03d}"
+        members.append(ClearingMember(
+            cm_id=f"CM-{i:03d}", name=f"Sub CM {i}",
+            cm_type=RNG.choice([CMType.SCM, CMType.PCM]),
+            net_worth=Decimal(str(RNG.randint(1_000_000, 10_000_000))),
+            security_deposit=Decimal(str(RNG.randint(100_000, 1_000_000))),
+            parent_cm_id=parent_id,
+        ))
+    session.add_all(members)
+    session.commit()
     return [f"CM-{i:03d}" for i in range(count)]
 
 
@@ -389,7 +402,7 @@ class TestHighVolumeDerivatives:
         assert len(records) == len(positions)
         assert elapsed < 10.0, f"MTM for 600 positions took {elapsed:.1f}s"
         net = net_mtm_by_counterparty(records)
-        assert sum(net.values()) != Decimal("0") or len(net) > 0
+        assert sum(net.values()) == sum(Decimal(str(r.mtm_amount)) for r in records)
 
     def test_mass_premium(self, db_session):
         _seed_derivative_universe(db_session, 10, 20)
@@ -408,8 +421,11 @@ class TestHighVolumeDerivatives:
             assignments = assign_short_positions(db_session, contract, exercises, seed=42)
             total_exercised += sum(e.exercised_quantity for e in exercises)
             total_assigned += sum(a.assigned_quantity for a in assignments)
-        # At least some options should be ITM and exercised
-        assert total_exercised > 0 or total_assigned >= 0
+            # Exercised quantity is assigned 1:1 to shorts (capped by total short lots held).
+            assert total_assigned <= total_exercised
+        # With 15 underlyings worth of randomly-priced FSPs against fixed strikes,
+        # some options must land ITM and get exercised.
+        assert total_exercised > 0
 
     def test_mass_final_settlement(self, db_session):
         contracts, _ = _seed_derivative_universe(db_session, 10, 15)
@@ -425,10 +441,17 @@ class TestHighVolumeDerivatives:
 
         for fut in futures[:5]:
             fsp = fsp_map.get(fut.contract_id, Decimal("1000"))
+            positions = db_session.query(DerivativePosition).filter_by(contract_id=fut.contract_id).all()
+            expected_counterparties = {p.counterparty_id for p in positions}
+
             fut_obligations = generate_futures_delivery_obligations(
                 db_session, fut, f"INE-{fut.underlying}", fsp, SETTLE_DATE,
             )
-            assert isinstance(fut_obligations, list)
+            assert {o.counterparty_id for o in fut_obligations} <= expected_counterparties
+            for o in fut_obligations:
+                assert o.net_quantity % fut.lot_size == 0
+                assert o.net_value == (fsp * o.net_quantity).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                assert o.net_direction in (NetDirection.PAY_IN, NetDirection.PAY_OUT)
 
         for opt in options[:5]:
             fsp = fsp_map.get(opt.contract_id, Decimal("1000"))
@@ -437,7 +460,11 @@ class TestHighVolumeDerivatives:
             opt_obligations = generate_option_delivery_obligations(
                 db_session, opt, f"INE-{opt.underlying}", exercises, assignments, SETTLE_DATE,
             )
-            assert isinstance(opt_obligations, list)
+            strike = Decimal(str(opt.strike_price))
+            for o in opt_obligations:
+                assert o.net_quantity % opt.lot_size == 0
+                assert o.net_value == (strike * o.net_quantity).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                assert o.net_direction in (NetDirection.PAY_IN, NetDirection.PAY_OUT)
 
 
 # ── Test: Phase 3 margins under load ────────────────────────────────────────
@@ -485,22 +512,32 @@ class TestHighVolumeMargins:
             result = compute_effective_collateral(cp_records)
             assert result["total"] > 0
             cash_violation = check_cash_rule(cp_records)
+            assert cash_violation is None or cash_violation.rule == "MIN_CASH"
             conc_violations = check_concentration_limit(cp_records)
-            assert isinstance(conc_violations, list)
+            assert all(v.rule == "CONCENTRATION" for v in conc_violations)
 
     def test_position_limits_many_checks(self):
-        for _ in range(1000):
+        config = get_margin_framework_config()["position_limits"]
+        cm_pct = Decimal(str(config["cm_level_pct_of_market_wide"])) / Decimal("100")
+        client_pct = Decimal(str(config["client_level_pct_of_market_wide"])) / Decimal("100")
+
+        for i in range(1000):
             free_float = RNG.randint(100_000, 10_000_000)
+            mw_limit = market_wide_limit(free_float)
+
             oi = RNG.randint(0, free_float * 2)
             result = check_market_wide_limit(oi, free_float)
-            if oi > int(free_float * 0.95):
-                assert result is not None
-            cm_result = check_cm_level_limit(
-                f"CM-{_ % 10:03d}", RNG.randint(0, free_float), free_float,
-            )
-            client_result = check_client_level_limit(
-                f"CLIENT-{_ % 10:03d}", RNG.randint(0, free_float), free_float,
-            )
+            assert (result is not None) == (oi > mw_limit)
+
+            cm_limit = int(Decimal(mw_limit) * cm_pct)
+            cm_oi = RNG.randint(0, free_float)
+            cm_result = check_cm_level_limit(f"CM-{i % 10:03d}", cm_oi, free_float)
+            assert (cm_result is not None) == (cm_oi > cm_limit)
+
+            client_limit = int(Decimal(mw_limit) * client_pct)
+            client_oi = RNG.randint(0, free_float)
+            client_result = check_client_level_limit(f"CLIENT-{i % 10:03d}", client_oi, free_float)
+            assert (client_result is not None) == (client_oi > client_limit)
 
 
 # ── Test: Phase 4 debt at scale ─────────────────────────────────────────────
@@ -547,8 +584,14 @@ class TestHighVolumeDebt:
                 assert contribution >= 0
 
     def test_gsec_recon_at_scale(self, db_session):
-        _seed_debt_universe(db_session, 20, 5)
+        trades = _seed_debt_universe(db_session, 20, 5)
+        gsec_trades = [t for t in trades if t.product_segment == ProductSegment.DEBT_GSEC]
+        for t in gsec_trades:
+            mark_securities_received(db_session, t.trade_id)
+            mark_funds_received(db_session, t.trade_id)
+
         internal = derive_gsec_positions(db_session, SETTLE_DATE)
+        assert len(internal) > 0
         # Build matching CCIL positions (some with mismatches)
         ccil = {}
         for key, qty in internal.items():
@@ -557,7 +600,7 @@ class TestHighVolumeDebt:
         results = reconcile_ccil_positions(db_session, SETTLE_DATE, ccil)
         reconciled = sum(1 for r in results if r.is_reconciled)
         unreconciled = sum(1 for r in results if not r.is_reconciled)
-        assert reconciled + unreconciled == len(results)
+        assert reconciled + unreconciled == len(results) == len(internal)
 
 
 # ── Test: Phase 5 advanced features at scale ─────────────────────────────────
@@ -567,14 +610,36 @@ class TestHighVolumeAdvanced:
 
     def test_deep_cm_hierarchy(self, db_session):
         cm_ids = _seed_cm_hierarchy(db_session, 20)
-        # Insert obligations for CMs
-        _bulk_trades(db_session, 2000, SourceSystem.OMS, random.Random(77))
+        # Seed trades directly under the real CM ids so netting/obligations
+        # reflect actual CM-owned trade flow, rather than relabeling obligations after the fact.
+        rng = random.Random(77)
+        trades = []
+        for i in range(2000):
+            trades.append(Trade(
+                trade_id=f"CMTRADE-{i:05d}",
+                isin=rng.choice(ISINS),
+                security_name="CMSTRESS",
+                quantity=rng.randint(1, 5000),
+                price=Decimal(str(round(rng.uniform(10, 10000), 2))),
+                trade_date=TRADE_DATE,
+                settlement_date=SETTLE_DATE,
+                settlement_cycle=SettlementCycle.T1,
+                counterparty_id=rng.choice(cm_ids),
+                counterparty_type=CounterpartyType.BROKER,
+                exchange=Exchange.NSE,
+                buy_sell=rng.choice([BuySell.BUY, BuySell.SELL]),
+                currency="INR",
+                source_system=SourceSystem.OMS,
+                segment=Segment.NORMAL,
+            ))
+        db_session.bulk_save_objects(trades)
+        db_session.commit()
+
         obligations = compute_obligations(db_session, SourceSystem.OMS, ObligationStage.FINAL)
-        # Map obligations to CM IDs
-        for i, ob in enumerate(obligations):
-            ob.counterparty_id = cm_ids[i % len(cm_ids)]
+        for ob in obligations:
             db_session.add(ob)
         db_session.commit()
+        assert len(obligations) > 0
 
         for parent_id in cm_ids[:4]:
             result = aggregate_obligations(db_session, parent_id, SETTLE_DATE)
