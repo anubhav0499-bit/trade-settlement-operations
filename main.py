@@ -18,6 +18,11 @@ Execution order:
 14. Monitor intraday liquidity
 15. Reconcile EOD positions
 16. Generate reports
+17. Seed multi-segment demo data (derivatives, debt, collateral, CM hierarchy, T+0)
+18. Run derivatives settlement (MTM, premium, exercise/assignment, final, delivery)
+19. Run margin & collateral framework (SPAN, exposure, VaR, delivery, cross, limits)
+20. Run debt & fixed income settlement (DvP-I, accrued interest, corp actions, SGF, G-Sec recon)
+21. Run advanced features (CM hierarchy, SGF waterfall, stress test, T+0, bond futures CTD)
 """
 
 import json
@@ -35,9 +40,13 @@ from src.logging_config import get_logger, setup_logging
 from src.settings import (
     DATA_DIR,
     DATABASE_URL,
+    ENABLE_ADVANCED_FEATURES,
     ENABLE_CSDR_PENALTIES,
+    ENABLE_DEBT,
+    ENABLE_DERIVATIVES,
     ENABLE_ISO20022,
     ENABLE_LIQUIDITY_MONITOR,
+    ENABLE_MARGINS,
     ENABLE_ML_PREDICTION,
     ENABLE_SCORECARDS,
     ML_RISK_THRESHOLD,
@@ -45,6 +54,9 @@ from src.settings import (
 from src.models.database import (
     AgenticAuditLog,
     BreakRecord,
+    CollateralRecord,
+    DebtInstrument,
+    DerivativeContract,
     Obligation,
     Trade,
     create_tables,
@@ -525,6 +537,275 @@ def _run_equity_cash_pipeline():
     )
     logger.info("step.complete", step=16, name="reporting")
 
+    # ── Step 17: Multi-Segment Seed Data ────────────────────────────────
+    logger.info("step.start", step=17, name="segment_seed")
+    from src.segments.demo_seed import (
+        CM_IDS,
+        CORP_BOND_ISIN,
+        EXPIRY_DATE,
+        GSEC_ISIN,
+        NIFTY_CE,
+        NIFTY_FUT,
+        RELIANCE_CE,
+        RELIANCE_FUT,
+        seed_clearing_members,
+        seed_collateral_records,
+        seed_debt_instruments_and_trades,
+        seed_derivative_contracts_and_positions,
+        seed_t0_equity_trades,
+    )
+
+    demo_date = date(2026, 6, 2)
+    debt_settle_date = date(2026, 6, 3)
+    seed_clearing_members(session)
+    seed_derivative_contracts_and_positions(session, demo_date)
+    seed_collateral_records(session, demo_date)
+    seed_debt_instruments_and_trades(session, demo_date, debt_settle_date)
+    seed_t0_equity_trades(session, demo_date)
+    logger.info("step.complete", step=17, name="segment_seed",
+                clearing_members=len(CM_IDS), derivative_contracts=4, debt_instruments=2)
+    _check_shutdown("step_17")
+
+    # ── Step 18: Derivatives Settlement (Equity F&O) ────────────────────
+    deriv_summary = {}
+    if ENABLE_DERIVATIVES:
+        logger.info("step.start", step=18, name="derivatives")
+        from src.derivatives.exercise_engine import assign_short_positions, exercise_long_positions
+        from src.derivatives.final_settlement import run_final_settlement
+        from src.derivatives.mtm_engine import compute_daily_mtm, get_mtm_summary
+        from src.derivatives.physical_delivery import (
+            generate_futures_delivery_obligations,
+            generate_option_delivery_obligations,
+            get_delivery_summary,
+        )
+        from src.derivatives.premium_engine import compute_premium_obligations, get_premium_summary
+
+        settlement_prices = {NIFTY_FUT: Decimal("23850"), NIFTY_CE: Decimal("190")}
+        mtm_records = compute_daily_mtm(session, demo_date, settlement_prices)
+        mtm_summary = get_mtm_summary(mtm_records)
+
+        net_premiums = compute_premium_obligations(session, demo_date)
+        premium_summary = get_premium_summary(net_premiums)
+
+        reliance_ce_contract = session.query(DerivativeContract).filter_by(contract_id=RELIANCE_CE).first()
+        reliance_fut_contract = session.query(DerivativeContract).filter_by(contract_id=RELIANCE_FUT).first()
+        fsp_nifty = Decimal("24100")
+        fsp_reliance = Decimal("1420")
+
+        exercise_results = exercise_long_positions(session, reliance_ce_contract, fsp_reliance)
+        assignment_results = assign_short_positions(session, reliance_ce_contract, exercise_results, seed=7)
+
+        final_mtm_records = run_final_settlement(
+            session, EXPIRY_DATE, {NIFTY_FUT: fsp_nifty, NIFTY_CE: fsp_nifty}
+        )
+
+        futures_delivery_obs = generate_futures_delivery_obligations(
+            session, reliance_fut_contract, "INE002A01018", fsp_reliance, EXPIRY_DATE
+        )
+        option_delivery_obs = generate_option_delivery_obligations(
+            session, reliance_ce_contract, "INE002A01018", exercise_results, assignment_results, EXPIRY_DATE
+        )
+        delivery_summary = get_delivery_summary(futures_delivery_obs + option_delivery_obs)
+
+        deriv_summary = {
+            "mtm_positions": mtm_summary["total_positions"],
+            "premium_counterparties": premium_summary["counterparties"],
+            "exercised_lots": sum(r.exercised_quantity for r in exercise_results),
+            "final_mtm_legs": len(final_mtm_records),
+            "delivery_obligations": delivery_summary["total"],
+        }
+        logger.info("step.complete", step=18, name="derivatives", **deriv_summary)
+    else:
+        logger.info("step.skipped", step=18, name="derivatives", reason="disabled")
+    _check_shutdown("step_18")
+
+    # ── Step 19: Margin & Collateral Framework ──────────────────────────
+    margin_summary = {}
+    if ENABLE_MARGINS:
+        logger.info("step.start", step=19, name="margins")
+        from src.collateral.manager import check_cash_rule, check_concentration_limit, compute_effective_collateral
+        from src.margins.cross_margin import apply_cross_margin, compute_cross_margin_benefit
+        from src.margins.delivery_margin import record_delivery_margin
+        from src.margins.exposure_margin import compute_exposure_margin
+        from src.margins.position_limits import (
+            check_client_level_limit,
+            check_cm_level_limit,
+            check_market_wide_limit,
+        )
+        from src.margins.span_engine import compute_span_margin
+        from src.margins.var_model import compute_var_margin, ewma_volatility
+
+        span_nifty = compute_span_margin(session, "BRK-001", "NIFTY", Decimal("23850"), is_index=True)
+        span_reliance = compute_span_margin(session, "BRK-002", "RELIANCE", Decimal("1390"), is_index=False)
+
+        exposure_nifty = compute_exposure_margin(Decimal("23850"), 50, 10, is_index=True)
+        exposure_reliance = compute_exposure_margin(
+            Decimal("1390"), 250, 5, is_index=False, std_dev_pct=Decimal("2.1")
+        )
+
+        equity_returns = [Decimal(v) for v in ["0.012", "-0.008", "0.015", "-0.004", "0.009"]]
+        volatility = ewma_volatility(equity_returns)
+        var_margin = compute_var_margin(Decimal("1650.50"), volatility)
+
+        delivery_margin_record = record_delivery_margin(
+            session, "BRK-002", ProductSegment.EQUITY_FO, EXPIRY_DATE, date(2026, 6, 23),
+            notional_value=Decimal("1390") * 250 * 5,
+        )
+
+        cross_benefit = compute_cross_margin_benefit(span_nifty.total_margin, Decimal("50000"), is_hedged=True)
+        net_after_hedge = apply_cross_margin(span_nifty.total_margin, cross_benefit)
+
+        mw_violation = check_market_wide_limit(open_interest_lots=18000, free_float_lots=80000)
+        cm_violation = check_cm_level_limit("BRK-001", cm_open_interest_lots=2500, free_float_lots=80000)
+        client_violation = check_client_level_limit("CLIENT-001", client_open_interest_lots=120, free_float_lots=80000)
+
+        collateral_records = session.query(CollateralRecord).filter_by(counterparty_id="BRK-001").all()
+        collateral_breakdown = compute_effective_collateral(collateral_records)
+        cash_violation = check_cash_rule(collateral_records)
+        concentration_violations = check_concentration_limit(collateral_records)
+
+        margin_summary = {
+            "span_nifty_total": float(span_nifty.total_margin),
+            "span_reliance_total": float(span_reliance.total_margin),
+            "exposure_nifty": float(exposure_nifty),
+            "exposure_reliance": float(exposure_reliance),
+            "var_margin": float(var_margin),
+            "delivery_margin_recorded": delivery_margin_record is not None,
+            "net_margin_after_hedge": float(net_after_hedge),
+            "position_limit_violations": sum(1 for v in (mw_violation, cm_violation, client_violation) if v),
+            "effective_collateral": float(collateral_breakdown["total"]),
+            "collateral_violations": (1 if cash_violation else 0) + len(concentration_violations),
+        }
+        logger.info("step.complete", step=19, name="margins", **margin_summary)
+    else:
+        logger.info("step.skipped", step=19, name="margins", reason="disabled")
+    _check_shutdown("step_19")
+
+    # ── Step 20: Debt & Fixed Income Settlement ─────────────────────────
+    debt_summary = {}
+    if ENABLE_DEBT:
+        logger.info("step.start", step=20, name="debt")
+        from src.debt.accrued_interest import compute_accrued_interest
+        from src.debt.corporate_actions import compute_coupon_payment, compute_redemption_amount
+        from src.debt.corporate_bond_settlement import (
+            get_settlement_summary,
+            mark_funds_received,
+            mark_securities_received,
+        )
+        from src.debt.gsec_integration import (
+            derive_gsec_positions,
+            get_gsec_recon_summary,
+            reconcile_ccil_positions,
+        )
+        from src.debt.sgf_contribution import compute_sgf_issuer_contribution
+
+        mark_securities_received(session, "DEBT-T001")
+        mark_funds_received(session, "DEBT-T001")
+        mark_securities_received(session, "DEBT-T003")
+        mark_funds_received(session, "DEBT-T003")
+        session.commit()
+        settlement_summary = get_settlement_summary(session, debt_settle_date)
+
+        corp_bond = session.query(DebtInstrument).filter_by(isin=CORP_BOND_ISIN).first()
+        coupon_rate = Decimal(str(corp_bond.coupon_rate_pct))
+        face_value = Decimal(str(corp_bond.face_value))
+        accrued = compute_accrued_interest(
+            face_value, coupon_rate, date(2026, 1, 15), debt_settle_date, corp_bond.day_count_convention
+        )
+        coupon = compute_coupon_payment(face_value, coupon_rate, corp_bond.coupon_frequency, 1000)
+        redemption = compute_redemption_amount(face_value, 1000)
+        sgf_contrib = compute_sgf_issuer_contribution(
+            face_value * 100000, corp_bond.issue_date, corp_bond.maturity_date
+        )
+
+        internal_positions = derive_gsec_positions(session, debt_settle_date)
+        ccil_positions = dict(internal_positions)
+        if ccil_positions:
+            first_key = next(iter(ccil_positions))
+            ccil_positions[first_key] += 500  # simulate a CCIL discrepancy for the demo
+        recon_results = reconcile_ccil_positions(session, debt_settle_date, ccil_positions)
+        recon_summary = get_gsec_recon_summary(recon_results)
+
+        debt_summary = {
+            "settled_trades": settlement_summary["SETTLED"],
+            "pending_trades": settlement_summary["PENDING"],
+            "accrued_interest": float(accrued),
+            "coupon_payment": float(coupon),
+            "redemption_amount": float(redemption),
+            "sgf_issuer_contribution": float(sgf_contrib),
+            "gsec_recon_reconciled": recon_summary["reconciled"],
+            "gsec_recon_unreconciled": recon_summary["unreconciled"],
+        }
+        logger.info("step.complete", step=20, name="debt", **debt_summary)
+    else:
+        logger.info("step.skipped", step=20, name="debt", reason="disabled")
+    _check_shutdown("step_20")
+
+    # ── Step 21: Advanced Features (Phase 5) ────────────────────────────
+    advanced_summary = {}
+    if ENABLE_ADVANCED_FEATURES:
+        logger.info("step.start", step=21, name="advanced_features")
+        from src.cm_hierarchy.hierarchy import aggregate_obligations
+        from src.derivatives.bond_futures import DeliverableBond, identify_cheapest_to_deliver
+        from src.risk.stress_test import get_stress_summary, rank_top_n_stressed_cms
+        from src.settlement.t0_engine import compute_t0_obligations, get_t0_summary
+        from src.sgf.waterfall import WaterfallInputs, get_waterfall_summary, run_default_waterfall
+
+        sample_obligation = (
+            session.query(Obligation)
+            .filter(Obligation.product_segment == ProductSegment.EQUITY_CASH)
+            .first()
+        )
+        cm_settlement_date = sample_obligation.settlement_date if sample_obligation else demo_date
+        cm_aggregation = aggregate_obligations(session, "BRK-001", cm_settlement_date)
+
+        t0_obligations = compute_t0_obligations(session)
+        t0_summary = get_t0_summary(t0_obligations)
+
+        reference_prices = {
+            NIFTY_FUT: Decimal("23850"), NIFTY_CE: Decimal("190"),
+            RELIANCE_FUT: Decimal("1390"), RELIANCE_CE: Decimal("45"),
+        }
+        margin_held = {"BRK-001": Decimal("1200000"), "BRK-002": Decimal("900000")}
+        stress_results = rank_top_n_stressed_cms(
+            session, ["BRK-001", "BRK-002"], demo_date, Decimal("15"), reference_prices, margin_held, top_n=2
+        )
+        stress_summary = get_stress_summary(stress_results)
+        worst_shortfall = stress_results[0].shortfall if stress_results else Decimal("0")
+
+        waterfall_inputs = WaterfallInputs(
+            defaulter_margin_collateral=Decimal("5000000"),
+            defaulter_base_capital=Decimal("2000000"),
+            defaulter_sgf_contribution=Decimal("1000000"),
+            nse_sgf_contribution=Decimal("3000000"),
+            other_cm_sgf_contributions={"BRK-002": Decimal("2000000"), "BRK-003": Decimal("500000")},
+            nse_other_resources=Decimal("5000000"),
+            insurance_cover=Decimal("1000000"),
+        )
+        waterfall_steps = run_default_waterfall(max(worst_shortfall, Decimal("15000000")), waterfall_inputs)
+        waterfall_summary = get_waterfall_summary(waterfall_steps)
+
+        ctd_bonds = [
+            DeliverableBond("BOND-A", Decimal("7.1"), Decimal("9"), Decimal("99.50")),
+            DeliverableBond("BOND-B", Decimal("8.0"), Decimal("9"), Decimal("105.20")),
+            DeliverableBond("BOND-C", Decimal("6.5"), Decimal("9"), Decimal("95.80")),
+        ]
+        ctd = identify_cheapest_to_deliver(ctd_bonds, Decimal("100"), Decimal("7"))
+
+        advanced_summary = {
+            "cm_aggregated_obligations": cm_aggregation["obligation_count"],
+            "cm_aggregated_value": float(cm_aggregation["total_value"]),
+            "t0_obligations": t0_summary["total"],
+            "stress_cms_with_shortfall": stress_summary["cms_with_shortfall"],
+            "waterfall_fully_covered": waterfall_summary["fully_covered"],
+            "waterfall_final_shortfall": float(waterfall_summary["final_shortfall"]),
+            "ctd_isin": ctd["isin"],
+        }
+        logger.info("step.complete", step=21, name="advanced_features", **advanced_summary)
+    else:
+        logger.info("step.skipped", step=21, name="advanced_features", reason="disabled")
+    _check_shutdown("step_21")
+
     # ── Final Summary ───────────────────────────────────────────────────
     total_final = session.query(Obligation).filter(
         Obligation.obligation_stage == ObligationStage.FINAL
@@ -556,7 +837,11 @@ def _run_equity_cash_pipeline():
                 penalties=len(penalty_assessments),
                 iso20022_messages=msg_summary["total_messages"],
                 scorecards=sc_summary["total"],
-                liquidity_alerts=len(liquidity_report.alerts) if liquidity_report else 0)
+                liquidity_alerts=len(liquidity_report.alerts) if liquidity_report else 0,
+                derivatives_mtm_positions=deriv_summary.get("mtm_positions", 0),
+                margin_span_nifty=margin_summary.get("span_nifty_total", 0),
+                debt_settled_trades=debt_summary.get("settled_trades", 0),
+                advanced_t0_obligations=advanced_summary.get("t0_obligations", 0))
 
     session.close()
 
