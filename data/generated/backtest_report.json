@@ -1,0 +1,225 @@
+{
+  "days": [
+    {
+      "day": 0,
+      "date": "2026-01-05",
+      "trades": 3000,
+      "obligations": 300,
+      "elapsed_s": 0.9208,
+      "is_stress_day": false,
+      "is_default_day": false,
+      "violations": [],
+      "error": null
+    },
+    {
+      "day": 1,
+      "date": "2026-01-06",
+      "trades": 2600,
+      "obligations": 299,
+      "elapsed_s": 1.0394,
+      "is_stress_day": false,
+      "is_default_day": false,
+      "violations": [],
+      "error": null
+    },
+    {
+      "day": 2,
+      "date": "2026-01-07",
+      "trades": 2200,
+      "obligations": 300,
+      "elapsed_s": 1.0117,
+      "is_stress_day": true,
+      "is_default_day": false,
+      "violations": [],
+      "error": null
+    },
+    {
+      "day": 3,
+      "date": "2026-01-08",
+      "trades": 1800,
+      "obligations": 298,
+      "elapsed_s": 1.0919,
+      "is_stress_day": false,
+      "is_default_day": false,
+      "violations": [],
+      "error": null
+    },
+    {
+      "day": 4,
+      "date": "2026-01-09",
+      "trades": 1400,
+      "obligations": 298,
+      "elapsed_s": 0.9293,
+      "is_stress_day": false,
+      "is_default_day": true,
+      "violations": [],
+      "error": null
+    },
+    {
+      "day": 5,
+      "date": "2026-01-10",
+      "trades": 1000,
+      "obligations": 293,
+      "elapsed_s": 0.8835,
+      "is_stress_day": true,
+      "is_default_day": false,
+      "violations": [],
+      "error": null
+    },
+    {
+      "day": 6,
+      "date": "2026-01-11",
+      "trades": 1400,
+      "obligations": 298,
+      "elapsed_s": 0.8973,
+      "is_stress_day": false,
+      "is_default_day": false,
+      "violations": [],
+      "error": null
+    },
+    {
+      "day": 7,
+      "date": "2026-01-12",
+      "trades": 1800,
+      "obligations": 300,
+      "elapsed_s": 1.0672,
+      "is_stress_day": false,
+      "is_default_day": false,
+      "violations": [],
+      "error": null
+    },
+    {
+      "day": 8,
+      "date": "2026-01-13",
+      "trades": 2200,
+      "obligations": 300,
+      "elapsed_s": 1.2707,
+      "is_stress_day": true,
+      "is_default_day": false,
+      "violations": [],
+      "error": null
+    },
+    {
+      "day": 9,
+      "date": "2026-01-14",
+      "trades": 2600,
+      "obligations": 300,
+      "elapsed_s": 1.4095,
+      "is_stress_day": false,
+      "is_default_day": true,
+      "violations": [],
+      "error": null
+    },
+    {
+      "day": 10,
+      "date": "2026-01-15",
+      "trades": 3000,
+      "obligations": 300,
+      "elapsed_s": 1.5546,
+      "is_stress_day": false,
+      "is_default_day": false,
+      "violations": [],
+      "error": null
+    },
+    {
+      "day": 11,
+      "date": "2026-01-16",
+      "trades": 2600,
+      "obligations": 300,
+      "elapsed_s": 1.6219,
+      "is_stress_day": true,
+      "is_default_day": false,
+      "violations": [],
+      "error": null
+    },
+    {
+      "day": 12,
+      "date": "2026-01-17",
+      "trades": 2200,
+      "obligations": 300,
+      "elapsed_s": 1.688,
+      "is_stress_day": false,
+      "is_default_day": false,
+      "violations": [],
+      "error": null
+    },
+    {
+      "day": 13,
+      "date": "2026-01-18",
+      "trades": 1800,
+      "obligations": 299,
+      "elapsed_s": 1.7738,
+      "is_stress_day": false,
+      "is_default_day": false,
+      "violations": [],
+      "error": null
+    },
+    {
+      "day": 14,
+      "date": "2026-01-19",
+      "trades": 1400,
+      "obligations": 298,
+      "elapsed_s": 1.7731,
+      "is_stress_day": true,
+      "is_default_day": true,
+      "violations": [],
+      "error": null
+    },
+    {
+      "day": 15,
+      "date": "2026-01-20",
+      "trades": 1000,
+      "obligations": 292,
+      "elapsed_s": 1.7663,
+      "is_stress_day": false,
+      "is_default_day": false,
+      "violations": [],
+      "error": null
+    },
+    {
+      "day": 16,
+      "date": "2026-01-21",
+      "trades": 1400,
+      "obligations": 296,
+      "elapsed_s": 1.8381,
+      "is_stress_day": false,
+      "is_default_day": false,
+      "violations": [],
+      "error": null
+    },
+    {
+      "day": 17,
+      "date": "2026-01-22",
+      "trades": 1800,
+      "obligations": 299,
+      "elapsed_s": 1.9586,
+      "is_stress_day": true,
+      "is_default_day": false,
+      "violations": [],
+      "error": null
+    },
+    {
+      "day": 18,
+      "date": "2026-01-23",
+      "trades": 2200,
+      "obligations": 299,
+      "elapsed_s": 2.2863,
+      "is_stress_day": false,
+      "is_default_day": false,
+      "violations": [],
+      "error": null
+    },
+    {
+      "day": 19,
+      "date": "2026-01-24",
+      "trades": 2600,
+      "obligations": 300,
+      "elapsed_s": 2.3936,
+      "is_stress_day": false,
+      "is_default_day": true,
+      "violations": [],
+      "error": null
+    }
+  ],
+  "violations": []
+}
