@@ -6,6 +6,20 @@ gross and bilaterally — each trade's securities leg and funds leg must
 both clear independently before that trade is settled. There is no
 netting across trades.
 
+Two settlement modes are modeled here:
+
+1. Asynchronous (mark_securities_received / mark_funds_received / settle_dvp1)
+   — each leg clears independently, whenever its custodian/bank confirms.
+   A trade CAN sit in a partially-cleared state indefinitely (one flag
+   True, the other False) — this is how real custodian-mediated DvP-I
+   works today.
+2. Atomic (settle_dvp_atomic / settle_dvp_atomic_batch) — both legs are
+   checked in a single pass; if they aren't simultaneously available,
+   NEITHER flag is set and the trade is left completely untouched. This
+   models the DLT/PvP "succeed or fail entirely" guarantee atomic
+   settlement platforms provide, where there is no observable
+   half-settled intermediate state at all.
+
 All computation is deterministic and rule-based — no LLM reasoning.
 """
 
@@ -61,3 +75,46 @@ def get_settlement_summary(session: Session, as_of_date: date) -> dict:
     for trade in trades:
         summary[trade.status.value] += 1
     return summary
+
+
+def settle_dvp_atomic(
+    session: Session, trade_id: str, securities_available: bool, funds_available: bool,
+) -> DebtTrade:
+    """Atomic DvP: both legs are evaluated together, in one decision. If
+    either leg isn't available right now, the trade is left exactly as it
+    was — no flag is set, no partial state is ever recorded. Contrast with
+    mark_securities_received/mark_funds_received above, which can legally
+    leave securities_received=True and funds_received=False persisted."""
+    trade = session.query(DebtTrade).filter_by(trade_id=trade_id).one()
+    if securities_available and funds_available:
+        trade.securities_received = True
+        trade.funds_received = True
+        trade.status = DebtTradeStatus.SETTLED
+    return trade
+
+
+def settle_dvp_atomic_batch(
+    session: Session,
+    trade_ids: list[str],
+    securities_availability: dict[str, bool],
+    funds_availability: dict[str, bool],
+) -> list[DebtTrade]:
+    """Run atomic settlement across a batch in one pass — real atomic/DLT
+    settlement runs in scheduled windows, not trade-by-trade. A trade absent
+    from either availability dict is treated as that leg not being
+    available (conservative: missing data never triggers a false settle)."""
+    return [
+        settle_dvp_atomic(
+            session, trade_id,
+            securities_availability.get(trade_id, False),
+            funds_availability.get(trade_id, False),
+        )
+        for trade_id in trade_ids
+    ]
+
+
+def get_atomic_settlement_summary(trades: list[DebtTrade]) -> dict:
+    if not trades:
+        return {"total": 0, "settled": 0, "unsettled": 0}
+    settled = sum(1 for t in trades if t.status == DebtTradeStatus.SETTLED)
+    return {"total": len(trades), "settled": settled, "unsettled": len(trades) - settled}

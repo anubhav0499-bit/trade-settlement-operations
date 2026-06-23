@@ -129,15 +129,21 @@ src/
 ├── penalties/                 CSDR progressive cash penalty calculator
 ├── auction/                    Auction & close-out workflow
 ├── triage/                      LangGraph agentic pipeline, FAISS knowledge base, ML fail predictor
-├── risk/                        Counterparty risk scorecard + portfolio stress testing (Phase 5)
+├── risk/                        Counterparty risk scorecard + portfolio stress testing + cross-CM
+│                                 contagion clustering (groups stress loss by underlying instead of
+│                                 by counterparty) (Phase 5)
 ├── liquidity/                    Intraday liquidity monitor
 ├── reconciliation/                EOD position reconciliation
 ├── reporting/                      Excel + DOCX report generation
 ├── segments/                       Per-segment settlement config (Phase 1) + demo seed data (Phase 5 wiring)
 ├── derivatives/                     MTM, premium, exercise/assignment, final settlement, physical delivery, bond futures CTD (Phase 2 + 5)
 ├── margins/                         SPAN, exposure margin, VaR margin, delivery margin, cross margin, position limits (Phase 3)
-├── collateral/                      Collateral manager — haircuts, cash rule, concentration limit (Phase 3)
-├── debt/                            Accrued interest, DvP-I settlement, corporate actions, trade ingestion, G-Sec/CCIL recon, SGF issuer contribution (Phase 4)
+├── collateral/                      Collateral manager — haircuts, cash rule, concentration limit;
+│                                     optimizer — recommends the cheapest compliant asset mix to
+│                                     pledge against a margin shortfall (Phase 3)
+├── debt/                            Accrued interest, DvP-I settlement (async leg-by-leg, plus an
+│                                     atomic all-or-nothing alternative mode), corporate actions,
+│                                     trade ingestion, G-Sec/CCIL recon, SGF issuer contribution (Phase 4)
 ├── cm_hierarchy/                    TM-CM hierarchy registration + obligation aggregation (Phase 5)
 ├── sgf/                             SGF default waterfall simulation (Phase 5)
 ├── settlement/                      T+0 parallel settlement path with full intraday cutoff

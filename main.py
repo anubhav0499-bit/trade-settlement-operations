@@ -624,6 +624,8 @@ def _run_equity_cash_pipeline():
     if ENABLE_MARGINS:
         logger.info("step.start", step=19, name="margins")
         from src.collateral.manager import check_cash_rule, check_concentration_limit, compute_effective_collateral
+        from src.collateral.optimizer import AvailableAsset, optimize_collateral_pledge
+        from src.models.enums import CollateralType
         from src.margins.cross_margin import apply_cross_margin, compute_cross_margin_benefit
         from src.margins.delivery_margin import record_delivery_margin
         from src.margins.exposure_margin import compute_exposure_margin
@@ -664,6 +666,19 @@ def _run_equity_cash_pipeline():
         cash_violation = check_cash_rule(collateral_records)
         concentration_violations = check_concentration_limit(collateral_records)
 
+        # Simulate a margin call exceeding BRK-001's current effective
+        # collateral by 5M — recommend the cheapest compliant top-up from
+        # its unencumbered asset pool rather than leaving "what to pledge"
+        # to manual choice.
+        available_pool = [
+            AvailableAsset(CollateralType.CASH, Decimal("5000000")),
+            AvailableAsset(CollateralType.GOVERNMENT_SECURITY, Decimal("3000000")),
+        ]
+        simulated_margin_call = collateral_breakdown["total"] + Decimal("5000000")
+        optimization = optimize_collateral_pledge(
+            collateral_records, available_pool, required_margin=simulated_margin_call,
+        )
+
         margin_summary = {
             "span_nifty_total": float(span_nifty.total_margin),
             "span_reliance_total": float(span_reliance.total_margin),
@@ -675,6 +690,9 @@ def _run_equity_cash_pipeline():
             "position_limit_violations": sum(1 for v in (mw_violation, cm_violation, client_violation) if v),
             "effective_collateral": float(collateral_breakdown["total"]),
             "collateral_violations": (1 if cash_violation else 0) + len(concentration_violations),
+            "collateral_optimization_shortfall": float(optimization.shortfall_before),
+            "collateral_optimization_pledges_recommended": len(optimization.recommendations),
+            "collateral_optimization_shortfall_remaining": float(optimization.shortfall_remaining),
         }
         logger.info("step.complete", step=19, name="margins", **margin_summary)
     else:
@@ -691,6 +709,7 @@ def _run_equity_cash_pipeline():
             get_settlement_summary,
             mark_funds_received,
             mark_securities_received,
+            settle_dvp_atomic,
         )
         from src.debt.gsec_integration import (
             derive_gsec_positions,
@@ -703,6 +722,10 @@ def _run_equity_cash_pipeline():
         mark_funds_received(session, "DEBT-T001")
         mark_securities_received(session, "DEBT-T003")
         mark_funds_received(session, "DEBT-T003")
+        # DEBT-T002 settles via the atomic mode instead — both legs are
+        # confirmed available simultaneously here, so it settles in one
+        # decision rather than via the two-call async pattern above.
+        settle_dvp_atomic(session, "DEBT-T002", securities_available=True, funds_available=True)
         session.commit()
         settlement_summary = get_settlement_summary(session, debt_settle_date)
 
@@ -749,7 +772,12 @@ def _run_equity_cash_pipeline():
 
         from src.cm_hierarchy.hierarchy import aggregate_obligations
         from src.derivatives.bond_futures import DeliverableBond, identify_cheapest_to_deliver
-        from src.risk.stress_test import get_stress_summary, rank_top_n_stressed_cms
+        from src.risk.stress_test import (
+            get_contagion_summary,
+            get_stress_summary,
+            identify_contagion_clusters,
+            rank_top_n_stressed_cms,
+        )
         from src.settlement.t0_engine import (
             compute_t0_obligations,
             get_t0_summary,
@@ -803,6 +831,16 @@ def _run_equity_cash_pipeline():
         stress_summary = get_stress_summary(stress_results)
         worst_shortfall = stress_results[0].shortfall if stress_results else Decimal("0")
 
+        # rank_top_n_stressed_cms above ranks each CM's stress loss alone —
+        # it can't see that BRK-001 and BRK-002 are both stressed by the
+        # SAME NIFTY move. identify_contagion_clusters surfaces that shared
+        # exposure as a systemic concentration the SGF would face all at
+        # once, not the uncorrelated sum the per-CM ranking implies.
+        contagion_clusters = identify_contagion_clusters(
+            session, ["BRK-001", "BRK-002"], demo_date, Decimal("15"), reference_prices,
+        )
+        contagion_summary = get_contagion_summary(contagion_clusters)
+
         waterfall_inputs = WaterfallInputs(
             defaulter_margin_collateral=Decimal("5000000"),
             defaulter_base_capital=Decimal("2000000"),
@@ -830,6 +868,8 @@ def _run_equity_cash_pipeline():
             "t0_failed": t0_summary["failed"],
             "t0_redirected_to_t1": t0_summary["redirected_to_t1"],
             "stress_cms_with_shortfall": stress_summary["cms_with_shortfall"],
+            "contagion_cluster_count": contagion_summary["cluster_count"],
+            "contagion_largest_cluster_underlying": contagion_summary["largest_cluster_underlying"],
             "waterfall_fully_covered": waterfall_summary["fully_covered"],
             "waterfall_final_shortfall": float(waterfall_summary["final_shortfall"]),
             "ctd_isin": ctd["isin"],
