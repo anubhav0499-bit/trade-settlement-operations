@@ -745,10 +745,17 @@ def _run_equity_cash_pipeline():
     advanced_summary = {}
     if ENABLE_ADVANCED_FEATURES:
         logger.info("step.start", step=21, name="advanced_features")
+        from datetime import time as clock_time
+
         from src.cm_hierarchy.hierarchy import aggregate_obligations
         from src.derivatives.bond_futures import DeliverableBond, identify_cheapest_to_deliver
         from src.risk.stress_test import get_stress_summary, rank_top_n_stressed_cms
-        from src.settlement.t0_engine import compute_t0_obligations, get_t0_summary
+        from src.settlement.t0_engine import (
+            compute_t0_obligations,
+            get_t0_summary,
+            partition_t0_eligible_trades,
+            settle_t0_funds,
+        )
         from src.sgf.waterfall import WaterfallInputs, get_waterfall_summary, run_default_waterfall
 
         sample_obligation = (
@@ -759,8 +766,31 @@ def _run_equity_cash_pipeline():
         cm_settlement_date = sample_obligation.settlement_date if sample_obligation else demo_date
         cm_aggregation = aggregate_obligations(session, "BRK-001", cm_settlement_date)
 
-        t0_obligations = compute_t0_obligations(session)
+        # T0-eligible tier is caller-supplied (an exchange-published list in
+        # reality, not a policy percentage). Only NIFTY-style large-caps are
+        # in NSE's current T0 tranche, so INE040A01034 is eligible but
+        # INE062A01020 (also seeded as T0 by demo_seed) gets redirected back
+        # to T+1 — demonstrating the tier filter actually excludes something.
+        t0_trades = session.query(Trade).filter(Trade.settlement_cycle == SettlementCycle.T0).all()
+        t0_eligible_trades, t0_redirected_trades = partition_t0_eligible_trades(
+            t0_trades, eligible_isins={"INE040A01034"},
+        )
+        # Redirect: ineligible trades are relabeled T1 rather than vanishing
+        # (this run's T+1 netting already happened in step 2, so a redirected
+        # trade joins tomorrow's T+1 cycle, not today's already-computed one).
+        for t in t0_redirected_trades:
+            t.settlement_cycle = SettlementCycle.T1
+        session.commit()
+
+        # 14:00 — inside the 14:30 obligation cutoff, so the window is open.
+        # compute_t0_obligations re-queries Trade itself, so it now only sees
+        # the trades left tagged T0 after the redirect above.
+        t0_obligations = compute_t0_obligations(session, current_time=clock_time(14, 0))
+        # 16:00 — inside the 16:30 funds settlement cutoff, so these settle.
+        settle_t0_funds(t0_obligations, clock_time(16, 0))
+        session.commit()
         t0_summary = get_t0_summary(t0_obligations)
+        t0_summary["redirected_to_t1"] = len(t0_redirected_trades)
 
         reference_prices = {
             NIFTY_FUT: Decimal("23850"), NIFTY_CE: Decimal("190"),
@@ -796,6 +826,9 @@ def _run_equity_cash_pipeline():
             "cm_aggregated_obligations": cm_aggregation["obligation_count"],
             "cm_aggregated_value": float(cm_aggregation["total_value"]),
             "t0_obligations": t0_summary["total"],
+            "t0_settled": t0_summary["settled"],
+            "t0_failed": t0_summary["failed"],
+            "t0_redirected_to_t1": t0_summary["redirected_to_t1"],
             "stress_cms_with_shortfall": stress_summary["cms_with_shortfall"],
             "waterfall_fully_covered": waterfall_summary["fully_covered"],
             "waterfall_final_shortfall": float(waterfall_summary["final_shortfall"]),

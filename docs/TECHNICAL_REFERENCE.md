@@ -140,7 +140,10 @@ src/
 ├── debt/                            Accrued interest, DvP-I settlement, corporate actions, trade ingestion, G-Sec/CCIL recon, SGF issuer contribution (Phase 4)
 ├── cm_hierarchy/                    TM-CM hierarchy registration + obligation aggregation (Phase 5)
 ├── sgf/                             SGF default waterfall simulation (Phase 5)
-├── settlement/                      T+0 parallel settlement path (Phase 5)
+├── settlement/                      T+0 parallel settlement path with full intraday cutoff
+│                                     enforcement (trade/obligation/funds-settlement windows,
+│                                     ISIN-tier eligibility) — modeled on NSE's live Feb 2026
+│                                     T+0 rollout (Phase 5)
 └── utils/                           Config loader (YAML), resilience (retry + circuit breaker)
 ```
 

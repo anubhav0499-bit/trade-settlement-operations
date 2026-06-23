@@ -1,4 +1,7 @@
-# T+0 (same-day) settlement cycle cutoffs for equity cash, per NSE's beta
-# T+0 rollout (top 500 stocks, optional alongside mandatory T+1).
+# T+0 (same-day) settlement cycle cutoffs for equity cash, per NSE's live
+# T+0 rollout (launched Feb 2026, up to 500 stocks, optional alongside
+# mandatory T+1): trades reported by trade_cutoff, obligations determined by
+# obligation_cutoff, funds credited by funds_settlement_cutoff — all same day.
 trade_cutoff: "13:30"
 obligation_cutoff: "14:30"
+funds_settlement_cutoff: "16:30"
