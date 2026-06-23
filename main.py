@@ -56,6 +56,7 @@ from src.models.enums import (
     MatchStatus,
     ObligationStage,
     ObligationStatus,
+    ProductSegment,
     SettlementCycle,
     SourceSystem,
 )
@@ -79,7 +80,25 @@ def _check_shutdown(step: str) -> None:
         sys.exit(0)
 
 
-def run_pipeline():
+def run_pipeline(product_segment: ProductSegment = ProductSegment.EQUITY_CASH):
+    """Dispatch the settlement pipeline for the given NSE product segment.
+
+    Only EQUITY_CASH is implemented today. The other segments (equity F&O,
+    currency derivatives, IRD, debt) get their own pipelines in later phases
+    per docs/NSE_CLEARING_SETTLEMENT_PLAN.md.
+    """
+    if product_segment != ProductSegment.EQUITY_CASH:
+        setup_logging()
+        get_logger(__name__).info(
+            "pipeline.segment_not_implemented", segment=product_segment.value
+        )
+        raise NotImplementedError(
+            f"Pipeline for segment {product_segment.value} is not implemented yet"
+        )
+    _run_equity_cash_pipeline()
+
+
+def _run_equity_cash_pipeline():
     setup_logging()
     start_time = time.monotonic()
 

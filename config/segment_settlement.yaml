@@ -1,0 +1,32 @@
+# Settlement cycle and obligation cutoffs per NSE product segment.
+# See docs/NSE_CLEARING_SETTLEMENT_PLAN.md for the underlying research.
+
+EQUITY_CASH:
+  settlement_cycle: T1
+  provisional_cutoff: "21:00"   # 9 PM on T day
+  final_cutoff: "09:00"         # 9 AM on T+1
+
+EQUITY_FO:
+  settlement_cycle: T1          # daily MTM/premium settle T+1; final settlement on expiry+1
+  provisional_cutoff: null
+  final_cutoff: "09:00"
+
+CURRENCY_DERIV:
+  settlement_cycle: T1
+  provisional_cutoff: null
+  final_cutoff: "09:00"
+
+IRD:
+  settlement_cycle: T1
+  provisional_cutoff: null
+  final_cutoff: "09:00"
+
+DEBT_CORP_BOND:
+  settlement_cycle: T1          # DvP-I, gross
+  provisional_cutoff: null
+  final_cutoff: "09:00"
+
+DEBT_GSEC:
+  settlement_cycle: T1          # DvP-III via CCIL, net basis
+  provisional_cutoff: null
+  final_cutoff: "09:00"

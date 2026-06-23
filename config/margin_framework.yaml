@@ -1,0 +1,39 @@
+# NSE-style margin framework parameters (Phase 3).
+# All percentages are config-driven so margin policy changes don't require code changes.
+
+span:
+  price_scan_range_pct:
+    index: 9.0
+    stock: 12.0
+  volatility_scan_range_pct_of_price_scan: 25.0
+  extreme_scenario_multiplier: 3.0
+  extreme_scenario_weight_pct: 32.0
+  short_option_minimum_pct: 3.0
+  calendar_spread_charge_per_lot: 200.0
+
+exposure_margin:
+  index_pct: 3.0
+  stock_pct: 5.0
+  stock_min_std_dev_multiplier: 1.5
+
+var_margin:
+  ewma_lambda: 0.94
+  confidence_z: 2.33
+
+cross_margin:
+  hedge_benefit_pct: 60.0
+
+position_limits:
+  market_wide_pct_of_free_float: 20.0
+  cm_level_pct_of_market_wide: 15.0
+  client_level_pct_of_market_wide: 1.0
+
+collateral:
+  min_cash_pct: 50.0
+  concentration_limit_pct: 10.0
+  haircuts_pct:
+    CASH: 0.0
+    BANK_GUARANTEE: 0.0
+    FIXED_DEPOSIT: 0.0
+    GOVERNMENT_SECURITY: 5.0
+    EQUITY: 30.0

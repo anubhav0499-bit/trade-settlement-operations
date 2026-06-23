@@ -14,6 +14,7 @@ class BuySell(str, Enum):
 class SettlementCycle(str, Enum):
     T0 = "T0"
     T1 = "T1"
+    T2 = "T2"
 
 
 class CounterpartyType(str, Enum):
@@ -31,6 +32,54 @@ class SourceSystem(str, Enum):
 class Segment(str, Enum):
     NORMAL = "NORMAL"
     TFT = "TFT"
+
+
+class ProductSegment(str, Enum):
+    """NSE clearing & settlement product segment (distinct from `Segment`,
+    which marks normal vs trade-for-trade within the equity cash segment)."""
+    EQUITY_CASH = "EQUITY_CASH"
+    EQUITY_FO = "EQUITY_FO"
+    CURRENCY_DERIV = "CURRENCY_DERIV"
+    IRD = "IRD"
+    DEBT_CORP_BOND = "DEBT_CORP_BOND"
+    DEBT_GSEC = "DEBT_GSEC"
+
+
+class ContractType(str, Enum):
+    FUTURES = "FUTURES"
+    OPTIONS = "OPTIONS"
+
+
+class OptionType(str, Enum):
+    CALL = "CALL"
+    PUT = "PUT"
+
+
+class ExerciseStyle(str, Enum):
+    EUROPEAN = "EUROPEAN"
+
+
+class DeliveryType(str, Enum):
+    CASH = "CASH"
+    PHYSICAL = "PHYSICAL"
+
+
+class MarginType(str, Enum):
+    SPAN = "SPAN"
+    EXPOSURE = "EXPOSURE"
+    VAR = "VAR"
+    ELM = "ELM"
+    DELIVERY = "DELIVERY"
+    PREMIUM = "PREMIUM"
+    ADDITIONAL = "ADDITIONAL"
+
+
+class CollateralType(str, Enum):
+    CASH = "CASH"
+    BANK_GUARANTEE = "BANK_GUARANTEE"
+    FIXED_DEPOSIT = "FIXED_DEPOSIT"
+    GOVERNMENT_SECURITY = "GOVERNMENT_SECURITY"
+    EQUITY = "EQUITY"
 
 
 class NetDirection(str, Enum):
@@ -120,3 +169,33 @@ class AuctionStatus(str, Enum):
 class InstructionDirection(str, Enum):
     DELIVER = "DELIVER"
     RECEIVE = "RECEIVE"
+
+
+class DebtInstrumentType(str, Enum):
+    CORPORATE_BOND = "CORPORATE_BOND"
+    GSEC = "GSEC"
+
+
+class DayCountConvention(str, Enum):
+    THIRTY_360 = "THIRTY_360"
+    ACTUAL_365 = "ACTUAL_365"
+    ACTUAL_ACTUAL = "ACTUAL_ACTUAL"
+
+
+class DebtTradeStatus(str, Enum):
+    PENDING = "PENDING"
+    SETTLED = "SETTLED"
+    FAILED = "FAILED"
+
+
+class CorporateActionType(str, Enum):
+    COUPON = "COUPON"
+    CALL = "CALL"
+    PUT = "PUT"
+    MATURITY = "MATURITY"
+
+
+class CMType(str, Enum):
+    TM_CM = "TM_CM"
+    SCM = "SCM"
+    PCM = "PCM"

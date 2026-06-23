@@ -24,3 +24,23 @@ def get_matching_config() -> dict:
 
 def get_confirmation_config() -> dict:
     return load_config("confirmation_cutoffs.yaml")
+
+
+def get_segment_settlement_config() -> dict:
+    return load_config("segment_settlement.yaml")
+
+
+def get_derivatives_settlement_config() -> dict:
+    return load_config("derivatives_settlement.yaml")
+
+
+def get_margin_framework_config() -> dict:
+    return load_config("margin_framework.yaml")
+
+
+def get_debt_settlement_config() -> dict:
+    return load_config("debt_settlement.yaml")
+
+
+def get_t0_settlement_config() -> dict:
+    return load_config("t0_settlement.yaml")

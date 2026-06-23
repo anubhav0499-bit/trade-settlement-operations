@@ -1,0 +1,6 @@
+# Delivery margin ramp for physically-settled stock F&O contracts.
+# Margin ramps linearly from 0 at E-(ramp_start_days_before_expiry) to
+# max_margin_pct of notional value on expiry day itself.
+delivery_margin:
+  ramp_start_days_before_expiry: 4
+  max_margin_pct: 50

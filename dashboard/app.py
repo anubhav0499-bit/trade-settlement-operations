@@ -10,6 +10,8 @@ Tabs:
   6. Liquidity Monitor — intraday fund flows, velocity, and alerts
   7. Audit Trail — agentic reasoning chain log
   8. Reconciliation — EOD position recon + auctions
+  9. Clearing Members — CM hierarchy and aggregated obligations
+  10. Risk & SGF — margin utilization and default waterfall simulator
 """
 
 import json
@@ -27,6 +29,9 @@ from src.models.database import (
     AgenticAuditLog,
     AuctionRecord,
     BreakRecord,
+    ClearingMember,
+    CollateralRecord,
+    MarginRecord,
     Obligation,
     Trade,
     create_tables,
@@ -41,6 +46,8 @@ from src.models.enums import (
     ObligationStatus,
     Severity,
 )
+from src.cm_hierarchy.hierarchy import aggregate_obligations, get_sub_tms
+from src.sgf.waterfall import WaterfallInputs, get_waterfall_summary, run_default_waterfall
 
 
 DB_PATH = "data/generated/settlement.db"
@@ -145,7 +152,7 @@ def main():
     st.divider()
 
     # ── Tabs ────────────────────────────────────────────────────────────
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs([
         "Break Queue",
         "Break Analysis",
         "ML Risk Scores",
@@ -154,6 +161,8 @@ def main():
         "Liquidity Monitor",
         "Audit Trail",
         "Reconciliation",
+        "Clearing Members",
+        "Risk & SGF",
     ])
 
     # ── Tab 1: Break Queue ──────────────────────────────────────────────
@@ -518,6 +527,112 @@ def main():
                     "outcome": a.outcome.value if a.outcome else "PENDING",
                 })
             st.dataframe(pd.DataFrame(auction_rows), use_container_width=True)
+
+    # ── Tab 9: Clearing Members ─────────────────────────────────────────
+    with tab9:
+        st.subheader("Clearing Member Hierarchy")
+
+        members = session.query(ClearingMember).all()
+        if members:
+            member_rows = [{
+                "cm_id": m.cm_id,
+                "name": m.name,
+                "cm_type": m.cm_type.value,
+                "parent_cm_id": m.parent_cm_id or "",
+                "net_worth": float(m.net_worth),
+                "security_deposit": float(m.security_deposit),
+                "is_active": m.is_active,
+            } for m in members]
+            st.dataframe(pd.DataFrame(member_rows), use_container_width=True)
+
+            top_level = [m for m in members if not m.parent_cm_id]
+            if top_level:
+                selected_cm = st.selectbox(
+                    "Aggregate obligations for clearing member",
+                    [m.cm_id for m in top_level],
+                )
+                sub_tms = get_sub_tms(session, selected_cm)
+                st.write(f"**Sub-TMs:** {', '.join(s.cm_id for s in sub_tms) or 'None'}")
+
+                agg_date = st.date_input("Settlement date", value=date.today())
+                agg = aggregate_obligations(session, selected_cm, agg_date)
+                col_a, col_b, col_c = st.columns(3)
+                col_a.metric("Members in hierarchy", agg["member_count"])
+                col_b.metric("Obligations", agg["obligation_count"])
+                col_c.metric("Total value", f"₹{float(agg['total_value']):,.2f}")
+        else:
+            st.info("No clearing members registered yet.")
+
+    # ── Tab 10: Risk & SGF ───────────────────────────────────────────────
+    with tab10:
+        st.subheader("Margin Utilization")
+
+        margin_records = session.query(MarginRecord).all()
+        collateral_records = session.query(CollateralRecord).all()
+        if margin_records:
+            margin_by_cp: dict[str, float] = {}
+            for m in margin_records:
+                margin_by_cp[m.counterparty_id] = margin_by_cp.get(m.counterparty_id, 0) + float(m.amount)
+            collateral_by_cp: dict[str, float] = {}
+            for c in collateral_records:
+                collateral_by_cp[c.counterparty_id] = collateral_by_cp.get(c.counterparty_id, 0) + float(c.value)
+
+            util_rows = []
+            for cp_id, margin_amt in margin_by_cp.items():
+                collateral_amt = collateral_by_cp.get(cp_id, 0)
+                utilization = (margin_amt / collateral_amt * 100) if collateral_amt else None
+                util_rows.append({
+                    "counterparty": cp_id,
+                    "margin_required": margin_amt,
+                    "collateral_held": collateral_amt,
+                    "utilization_pct": round(utilization, 1) if utilization is not None else None,
+                })
+            st.dataframe(pd.DataFrame(util_rows), use_container_width=True)
+        else:
+            st.info("No margin records available.")
+
+        st.divider()
+        st.subheader("Default Waterfall Simulator")
+        st.caption("Enter a hypothetical shortfall and resource amounts to walk through the 7-step cascade.")
+
+        col1, col2 = st.columns(2)
+        with col1:
+            shortfall = st.number_input("Shortfall amount", min_value=0.0, value=1_000_000.0, step=10_000.0)
+            defaulter_margin = st.number_input("Defaulter margins & collateral", min_value=0.0, value=400_000.0, step=10_000.0)
+            defaulter_capital = st.number_input("Defaulter base capital", min_value=0.0, value=200_000.0, step=10_000.0)
+            defaulter_sgf = st.number_input("Defaulter Core SGF contribution", min_value=0.0, value=100_000.0, step=10_000.0)
+        with col2:
+            nse_sgf = st.number_input("NSE Clearing's Core SGF contribution", min_value=0.0, value=150_000.0, step=10_000.0)
+            other_cm_sgf = st.number_input("Non-defaulting CMs' Core SGF (pooled)", min_value=0.0, value=300_000.0, step=10_000.0)
+            nse_other = st.number_input("NSE Clearing's other resources", min_value=0.0, value=100_000.0, step=10_000.0)
+            insurance = st.number_input("Insurance cover", min_value=0.0, value=0.0, step=10_000.0)
+
+        if st.button("Run waterfall simulation", type="primary"):
+            inputs = WaterfallInputs(
+                defaulter_margin_collateral=Decimal(str(defaulter_margin)),
+                defaulter_base_capital=Decimal(str(defaulter_capital)),
+                defaulter_sgf_contribution=Decimal(str(defaulter_sgf)),
+                nse_sgf_contribution=Decimal(str(nse_sgf)),
+                other_cm_sgf_contributions={"pooled": Decimal(str(other_cm_sgf))},
+                nse_other_resources=Decimal(str(nse_other)),
+                insurance_cover=Decimal(str(insurance)),
+            )
+            steps = run_default_waterfall(Decimal(str(shortfall)), inputs)
+            summary = get_waterfall_summary(steps)
+
+            step_rows = [{
+                "step": s.step_number,
+                "layer": s.step_name,
+                "shortfall_before": float(s.shortfall_before),
+                "applied": float(s.applied),
+                "shortfall_after": float(s.shortfall_after),
+            } for s in steps]
+            st.dataframe(pd.DataFrame(step_rows), use_container_width=True)
+
+            if summary["fully_covered"]:
+                st.success(f"Shortfall fully covered after step {summary['steps_used']}.")
+            else:
+                st.error(f"Residual shortfall of ₹{float(summary['final_shortfall']):,.2f} remains uncovered.")
 
 
 if __name__ == "__main__":

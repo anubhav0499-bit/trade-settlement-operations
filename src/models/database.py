@@ -23,16 +23,26 @@ from src.models.enums import (
     BreakStatus,
     BreakType,
     BuySell,
+    CMType,
+    CollateralType,
     ConfirmationStatus,
+    ContractType,
     CounterpartyType,
+    DayCountConvention,
+    DebtInstrumentType,
+    DebtTradeStatus,
+    DeliveryType,
     Depository,
     Exchange,
     InstructionDirection,
     InstructionStatus,
+    MarginType,
     MatchStatus,
     NetDirection,
     ObligationStage,
     ObligationStatus,
+    OptionType,
+    ProductSegment,
     Segment,
     SettlementCycle,
     Severity,
@@ -62,6 +72,9 @@ class Trade(Base):
     currency = Column(String, nullable=False, default="INR")
     source_system = Column(SAEnum(SourceSystem), nullable=False)
     segment = Column(SAEnum(Segment), nullable=False, default=Segment.NORMAL)
+    product_segment = Column(
+        SAEnum(ProductSegment), nullable=False, default=ProductSegment.EQUITY_CASH
+    )
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
 
@@ -81,6 +94,9 @@ class Obligation(Base):
     counterparty_type = Column(SAEnum(CounterpartyType), nullable=False)
     exchange = Column(SAEnum(Exchange), nullable=False)
     obligation_stage = Column(SAEnum(ObligationStage), nullable=False)
+    product_segment = Column(
+        SAEnum(ProductSegment), nullable=False, default=ProductSegment.EQUITY_CASH
+    )
     status = Column(
         SAEnum(ObligationStatus), nullable=False, default=ObligationStatus.PENDING
     )
@@ -226,6 +242,140 @@ class PositionRecord(Base):
     quantity = Column(Integer, nullable=False)
     as_of_date = Column(Date, nullable=False, index=True)
     last_updated = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class DerivativeContract(Base):
+    """A listed F&O / currency / interest rate derivative contract."""
+
+    __tablename__ = "derivative_contracts"
+
+    contract_id = Column(String, primary_key=True)
+    underlying = Column(String, nullable=False, index=True)
+    product_segment = Column(SAEnum(ProductSegment), nullable=False)
+    contract_type = Column(SAEnum(ContractType), nullable=False)
+    option_type = Column(SAEnum(OptionType), nullable=True)
+    delivery_type = Column(SAEnum(DeliveryType), nullable=False)
+    strike_price = Column(Numeric(12, 4), nullable=True)
+    lot_size = Column(Integer, nullable=False)
+    expiry_date = Column(Date, nullable=False, index=True)
+    currency = Column(String, nullable=False, default="INR")
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class DerivativePosition(Base):
+    """An open position held by a counterparty in a derivative contract."""
+
+    __tablename__ = "derivative_positions"
+
+    position_id = Column(String, primary_key=True)
+    contract_id = Column(String, nullable=False, index=True)
+    counterparty_id = Column(String, nullable=False, index=True)
+    buy_sell = Column(SAEnum(BuySell), nullable=False)
+    quantity = Column(Integer, nullable=False)
+    trade_price = Column(Numeric(12, 4), nullable=False)
+    position_date = Column(Date, nullable=False, index=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class MTMSettlement(Base):
+    """Daily mark-to-market settlement on an open derivative position."""
+
+    __tablename__ = "mtm_settlements"
+
+    mtm_id = Column(String, primary_key=True)
+    contract_id = Column(String, nullable=False, index=True)
+    counterparty_id = Column(String, nullable=False, index=True)
+    settlement_date = Column(Date, nullable=False, index=True)
+    settlement_price = Column(Numeric(12, 4), nullable=False)
+    mtm_amount = Column(Numeric(15, 2), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class MarginRecord(Base):
+    """A margin requirement levied on a counterparty for a product segment."""
+
+    __tablename__ = "margin_records"
+
+    margin_id = Column(String, primary_key=True)
+    counterparty_id = Column(String, nullable=False, index=True)
+    product_segment = Column(SAEnum(ProductSegment), nullable=False)
+    margin_type = Column(SAEnum(MarginType), nullable=False)
+    amount = Column(Numeric(15, 2), nullable=False)
+    as_of_date = Column(Date, nullable=False, index=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class CollateralRecord(Base):
+    """Collateral pledged by a counterparty against margin requirements."""
+
+    __tablename__ = "collateral_records"
+
+    collateral_id = Column(String, primary_key=True)
+    counterparty_id = Column(String, nullable=False, index=True)
+    collateral_type = Column(SAEnum(CollateralType), nullable=False)
+    value = Column(Numeric(15, 2), nullable=False)
+    haircut_pct = Column(Float, nullable=False, default=0.0)
+    as_of_date = Column(Date, nullable=False, index=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class DebtInstrument(Base):
+    """A corporate bond or G-Sec reference record."""
+
+    __tablename__ = "debt_instruments"
+
+    isin = Column(String, primary_key=True)
+    issuer = Column(String, nullable=False)
+    instrument_type = Column(SAEnum(DebtInstrumentType), nullable=False)
+    face_value = Column(Numeric(15, 2), nullable=False)
+    coupon_rate_pct = Column(Float, nullable=False)
+    coupon_frequency = Column(Integer, nullable=False, default=2)
+    issue_date = Column(Date, nullable=False)
+    maturity_date = Column(Date, nullable=False, index=True)
+    day_count_convention = Column(SAEnum(DayCountConvention), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class DebtTrade(Base):
+    """A corporate bond / G-Sec trade settling DvP-I (gross, no netting)."""
+
+    __tablename__ = "debt_trades"
+
+    trade_id = Column(String, primary_key=True)
+    isin = Column(String, nullable=False, index=True)
+    buyer_id = Column(String, nullable=False, index=True)
+    seller_id = Column(String, nullable=False, index=True)
+    quantity = Column(Integer, nullable=False)
+    clean_price = Column(Numeric(12, 4), nullable=False)
+    trade_date = Column(Date, nullable=False, index=True)
+    settlement_date = Column(Date, nullable=False, index=True)
+    product_segment = Column(SAEnum(ProductSegment), nullable=False)
+    source = Column(String, nullable=False)
+    status = Column(
+        SAEnum(DebtTradeStatus), nullable=False, default=DebtTradeStatus.PENDING
+    )
+    securities_received = Column(Boolean, nullable=False, default=False)
+    funds_received = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class ClearingMember(Base):
+    """A clearing member in NSE Clearing's hierarchy (TM-CM, SCM, or PCM).
+
+    parent_cm_id is set when this member is a sub-TM cleared by a TM-CM or PCM,
+    enabling obligation aggregation up the hierarchy.
+    """
+
+    __tablename__ = "clearing_members"
+
+    cm_id = Column(String, primary_key=True)
+    name = Column(String, nullable=False)
+    cm_type = Column(SAEnum(CMType), nullable=False)
+    parent_cm_id = Column(String, nullable=True, index=True)
+    net_worth = Column(Numeric(15, 2), nullable=False)
+    security_deposit = Column(Numeric(15, 2), nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
 
 def get_engine(db_path: str = "data/generated/settlement.db"):

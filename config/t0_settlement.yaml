@@ -1,0 +1,4 @@
+# T+0 (same-day) settlement cycle cutoffs for equity cash, per NSE's beta
+# T+0 rollout (top 500 stocks, optional alongside mandatory T+1).
+trade_cutoff: "13:30"
+obligation_cutoff: "14:30"
