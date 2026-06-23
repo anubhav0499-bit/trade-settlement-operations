@@ -10,8 +10,8 @@ a real bug in the engine, not a data-quality issue.
 from collections import defaultdict
 from decimal import Decimal
 
-from src.models.database import CollateralRecord, Obligation
-from src.models.enums import NetDirection
+from src.models.database import CollateralRecord, DebtTrade, Obligation
+from src.models.enums import DebtTradeStatus, NetDirection
 
 # Per-ISIN-per-day rounding tolerance for net_value conservation: VWAP is
 # quantized to 4dp per counterparty group, then net_value to 2dp, so a few
@@ -88,6 +88,24 @@ def check_waterfall_conservation(shortfall: Decimal, summary: dict) -> list[str]
         violations.append(f"waterfall final_shortfall is negative: {summary['final_shortfall']}")
     if summary["total_covered"] < 0:
         violations.append(f"waterfall total_covered is negative: {summary['total_covered']}")
+    return violations
+
+
+def check_debt_settlement(trades: list[DebtTrade]) -> list[str]:
+    """Once both legs of a DvP-I trade have cleared, status must be SETTLED —
+    never left PENDING with both flags true, and never SETTLED with a flag false."""
+    violations = []
+    for t in trades:
+        both_legs_cleared = t.securities_received and t.funds_received
+        if both_legs_cleared and t.status != DebtTradeStatus.SETTLED:
+            violations.append(
+                f"debt trade {t.trade_id}: both legs cleared but status is {t.status}, expected SETTLED"
+            )
+        if t.status == DebtTradeStatus.SETTLED and not both_legs_cleared:
+            violations.append(
+                f"debt trade {t.trade_id}: status SETTLED but securities_received="
+                f"{t.securities_received}, funds_received={t.funds_received}"
+            )
     return violations
 
 

@@ -70,7 +70,7 @@ class Trade(Base):
     exchange = Column(SAEnum(Exchange), nullable=False)
     buy_sell = Column(SAEnum(BuySell), nullable=False)
     currency = Column(String, nullable=False, default="INR")
-    source_system = Column(SAEnum(SourceSystem), nullable=False)
+    source_system = Column(SAEnum(SourceSystem), nullable=False, index=True)
     segment = Column(SAEnum(Segment), nullable=False, default=Segment.NORMAL)
     product_segment = Column(
         SAEnum(ProductSegment), nullable=False, default=ProductSegment.EQUITY_CASH

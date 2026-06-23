@@ -27,7 +27,7 @@ import random
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from src.models.database import Base
+from src.models.database import Base, Trade
 from src.models.enums import ObligationStage, SourceSystem
 
 from src.netting.obligation_engine import compute_obligations
@@ -36,6 +36,7 @@ from src.margins.span_engine import compute_span_margin
 from src.collateral.manager import check_concentration_limit
 from src.cm_hierarchy.hierarchy import aggregate_obligations, get_all_descendant_ids
 from src.sgf.waterfall import run_default_waterfall, WaterfallInputs, get_waterfall_summary
+from src.debt.corporate_bond_settlement import mark_funds_received, mark_securities_received
 
 from backtest import scenario
 from backtest import invariants
@@ -46,7 +47,16 @@ def _volume_multiplier(day_idx: int) -> float:
     return 1.0 + 2.0 * abs(((day_idx % 10) - 5) / 5)
 
 
-def run_backtest(num_days: int, base_volume: int, seed: int) -> tuple[list[dict], list[str]]:
+def run_backtest(
+    num_days: int, base_volume: int, seed: int, archive_trades: bool = False,
+) -> tuple[list[dict], list[str]]:
+    """If archive_trades is True, settled equity-cash trades are purged from
+    the Trade table once they've been netted into today's obligations — this
+    models the operational hygiene a continuously-running deployment would
+    need (compute_obligations has no date filter; it re-derives obligations
+    from every trade ever inserted, by design, since the production system
+    recreates its DB fresh on every run). Without archiving, runtime grows
+    with cumulative trade history rather than the day's own volume."""
     rng = random.Random(seed)
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -92,6 +102,10 @@ def run_backtest(num_days: int, base_volume: int, seed: int) -> tuple[list[dict]
                 session.add(ob)
             session.commit()
 
+            if archive_trades:
+                session.query(Trade).filter(Trade.source_system == SourceSystem.OMS).delete()
+                session.commit()
+
             # 2. Derivatives MTM, chained day-over-day via prior MTMSettlement rows
             nifty_price = isin_prices[scenario.ISINS[0]] * Decimal("47")
             settlement_prices = {
@@ -135,9 +149,27 @@ def run_backtest(num_days: int, base_volume: int, seed: int) -> tuple[list[dict]
                     parent_id, result["total_value"], independent_sum
                 )
 
-            # 6. SGF default waterfall on injected default days
+            # 6. Debt DvP-I: a few gross bilateral trades per day, settled same-day
+            debt_trades = scenario.generate_debt_trades(session, trade_date, settle_date, 4, rng)
+            for dt in debt_trades:
+                mark_securities_received(session, dt.trade_id)
+                mark_funds_received(session, dt.trade_id)
+            day_violations += invariants.check_debt_settlement(debt_trades)
+
+            # 7. SGF default waterfall on injected default days. Day 9/19 (every
+            # 10th) is a cascading default — shortfall deliberately exceeds the
+            # maximum possible sum of all 7 resource layers — to guarantee the
+            # "resources exhausted, final_shortfall > 0" path actually gets
+            # exercised at least once, rather than leaving it to chance (random
+            # shortfalls in the 500K-5M range were, in practice, always fully
+            # covered by the up-to-~7.1M of randomly drawn resources).
+            waterfall_summary = None
             if is_default_day:
-                shortfall = Decimal(str(rng.randint(500_000, 5_000_000)))
+                is_cascading = day_idx % 10 == 9
+                if is_cascading:
+                    shortfall = Decimal("50000000")
+                else:
+                    shortfall = Decimal(str(rng.randint(500_000, 5_000_000)))
                 inputs = WaterfallInputs(
                     defaulter_margin_collateral=Decimal(str(rng.randint(0, 2_000_000))),
                     defaulter_base_capital=Decimal(str(rng.randint(0, 1_000_000))),
@@ -152,11 +184,24 @@ def run_backtest(num_days: int, base_volume: int, seed: int) -> tuple[list[dict]
                 steps = run_default_waterfall(shortfall, inputs)
                 summary = get_waterfall_summary(steps)
                 day_violations += invariants.check_waterfall_conservation(shortfall, summary)
+                if is_cascading and summary["fully_covered"]:
+                    day_violations.append(
+                        "cascading default day expected fully_covered=False "
+                        f"(shortfall {shortfall} vs max possible resources ~7.1M) but got True"
+                    )
+                waterfall_summary = {
+                    "shortfall": str(shortfall),
+                    "is_cascading": is_cascading,
+                    "total_covered": str(summary["total_covered"]),
+                    "final_shortfall": str(summary["final_shortfall"]),
+                    "fully_covered": summary["fully_covered"],
+                }
 
             error = None
         except Exception as exc:  # noqa: BLE001 - a day-level crash is itself the finding
             trade_count = 0
             todays_obligations = []
+            waterfall_summary = None
             error = f"{type(exc).__name__}: {exc}"
 
         elapsed = time.time() - day_start
@@ -168,6 +213,7 @@ def run_backtest(num_days: int, base_volume: int, seed: int) -> tuple[list[dict]
             "elapsed_s": round(elapsed, 4),
             "is_stress_day": is_stress_day,
             "is_default_day": is_default_day,
+            "waterfall": waterfall_summary,
             "violations": day_violations,
             "error": error,
         })
@@ -228,9 +274,16 @@ def main() -> int:
     parser.add_argument("--base-volume", type=int, default=500, help="base matched-trade-pairs per day")
     parser.add_argument("--seed", type=int, default=2024, help="RNG seed for reproducibility")
     parser.add_argument("--json-out", type=str, default=None, help="optional path to write the full JSON report")
+    parser.add_argument(
+        "--archive-trades", action="store_true",
+        help="purge settled trades after each day (models production archival hygiene; "
+             "without it, runtime grows with cumulative history, not daily volume)",
+    )
     args = parser.parse_args()
 
-    day_metrics, all_violations = run_backtest(args.days, args.base_volume, args.seed)
+    day_metrics, all_violations = run_backtest(
+        args.days, args.base_volume, args.seed, archive_trades=args.archive_trades
+    )
     _print_report(day_metrics, all_violations)
 
     if args.json_out:

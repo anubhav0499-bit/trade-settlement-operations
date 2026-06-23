@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from src.models.database import (
     ClearingMember,
     CollateralRecord,
+    DebtTrade,
     DerivativeContract,
     DerivativePosition,
     Trade,
@@ -33,6 +34,7 @@ from src.models.enums import (
     CollateralType,
     ContractType,
     CounterpartyType,
+    DebtTradeStatus,
     DeliveryType,
     Exchange,
     OptionType,
@@ -41,6 +43,9 @@ from src.models.enums import (
     SettlementCycle,
     SourceSystem,
 )
+
+DEBT_ISIN_CORP = "BT-BOND-CORP"
+DEBT_ISIN_GSEC = "BT-BOND-GSEC"
 
 COUNTERPARTIES = [f"BT-CM-{i:03d}" for i in range(1, 21)]
 ISINS = [f"INE{i:03d}BT01{i:03d}" for i in range(1, 16)]
@@ -206,3 +211,33 @@ def seed_derivative_book(session: Session, position_date: date, cm_ids: list[str
     ])
     session.commit()
     return contracts
+
+
+def generate_debt_trades(
+    session: Session, trade_date: date, settle_date: date, num_trades: int, rng,
+) -> list[DebtTrade]:
+    """A handful of gross DvP-I corporate-bond/G-Sec trades per day, alternating
+    instrument type, with distinct buyer/seller — no netting, so unlike equity
+    cash there's no conservation invariant to check, only the SETTLED status
+    transition once both legs clear."""
+    trades = []
+    for i in range(num_trades):
+        is_gsec = i % 2 == 0
+        isin = DEBT_ISIN_GSEC if is_gsec else DEBT_ISIN_CORP
+        buyer, seller = rng.sample(COUNTERPARTIES, 2)
+        trades.append(DebtTrade(
+            trade_id=f"BT-DEBT-{trade_date.isoformat()}-{i:04d}",
+            isin=isin,
+            buyer_id=buyer,
+            seller_id=seller,
+            quantity=rng.randint(100, 5000),
+            clean_price=Decimal(str(round(rng.uniform(95, 105), 2))),
+            trade_date=trade_date,
+            settlement_date=settle_date,
+            product_segment=ProductSegment.DEBT_GSEC if is_gsec else ProductSegment.DEBT_CORP_BOND,
+            source="CCIL" if is_gsec else "CBRICS",
+            status=DebtTradeStatus.PENDING,
+        ))
+    session.add_all(trades)
+    session.commit()
+    return trades
