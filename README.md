@@ -1,10 +1,16 @@
 # Trade Settlement Operations Agent
 
-Autonomous post-trade settlement operations system for NSE/BSE equity trades under T+1 (standard) and T+0 (phased rollout for top 500 stocks) settlement cycles. Enhanced with industry-standard innovations: ML-based fail prediction, CSDR progressive penalties, ISO 20022 messaging, counterparty risk scorecards, and intraday liquidity monitoring.
+Autonomous post-trade clearing & settlement simulation covering NSE/BSE equity cash (T+1 standard, T+0 phased rollout for top 500 stocks), equity/currency/interest-rate derivatives, and corporate bond/G-Sec debt settlement. Enhanced with industry-standard innovations: ML-based fail prediction, CSDR progressive penalties, ISO 20022 messaging, counterparty risk scorecards, intraday liquidity monitoring, SPAN-style margining, multi-CM hierarchy, and SGF default waterfall simulation.
+
+## Documentation
+
+- **This README** — deep methodology for the original equity-cash pipeline: netting math, matching tolerances, break taxonomy, CSDR penalties, ML fail prediction, ISO 20022, scorecards, liquidity monitoring.
+- **[`docs/TECHNICAL_REFERENCE.md`](docs/TECHNICAL_REFERENCE.md)** — full system architecture across all 6 product segments (all 21 pipeline steps), the complete data model, the module map, the design conventions every module follows, and an implementation guide for extending the system.
+- **[`docs/NSE_CLEARING_SETTLEMENT_PLAN.md`](docs/NSE_CLEARING_SETTLEMENT_PLAN.md)** — the original phased build plan (Phase 1–5) this system was implemented against.
 
 ## Architecture
 
-The system replicates the daily workflow of a settlements operations analyst through a 16-stage deterministic + agentic pipeline:
+The system replicates the daily workflow of a settlements operations analyst through a 16-stage deterministic + agentic pipeline for equity cash, followed by 5 more steps (17–21) that seed and settle the other product segments — derivatives, margins, debt, and cross-segment advanced features. See [`docs/TECHNICAL_REFERENCE.md`](docs/TECHNICAL_REFERENCE.md) for the full 21-step picture; this section covers the original equity-cash 16:
 
 1. **Trade Capture & Normalization** — Ingests from 3 source formats (OMS, broker confirmation, custodian statement), normalizes into a canonical trade schema
 2. **Netting & Obligation Engine** — Multilateral netting at (ISIN, counterparty, settlement_date) grain with VWAP pricing, provisional + final stages
@@ -22,7 +28,7 @@ The system replicates the daily workflow of a settlements operations analyst thr
 14. **Intraday Liquidity Monitor** — Real-time settlement flow tracking with programmable alerts
 15. **Position Reconciliation** — EOD position derivation from settled obligations vs custodian holdings
 16. **Reporting** — Multi-tab Excel + narrative DOCX with STP rate, cost-of-exception, counterparty analysis
-17. **Dashboard** — Enhanced Streamlit app with 8 tabs: breaks, analysis, ML risk, scorecards, penalties, liquidity, audit, recon
+17. **Dashboard** — Streamlit app with 10 tabs: breaks, analysis, ML risk, scorecards, penalties, liquidity, audit, recon, clearing members, risk & SGF
 
 ## Quick Start
 
@@ -77,6 +83,10 @@ All settings are sourced from environment variables with sensible defaults. Copy
 | `SETTLE_ENABLE_ML` | `true` | Toggle ML prediction module |
 | `SETTLE_ENABLE_CSDR` | `true` | Toggle CSDR penalty module |
 | `SETTLE_ENABLE_ISO20022` | `true` | Toggle ISO 20022 formatting |
+| `SETTLE_ENABLE_DERIVATIVES` | `true` | Toggle derivatives settlement (step 18) |
+| `SETTLE_ENABLE_MARGINS` | `true` | Toggle margin & collateral framework (step 19) |
+| `SETTLE_ENABLE_DEBT` | `true` | Toggle debt & fixed income settlement (step 20) |
+| `SETTLE_ENABLE_ADVANCED` | `true` | Toggle CM hierarchy/SGF/stress test/T+0/bond futures (step 21) |
 | `SETTLE_DASHBOARD_PORT` | `8501` | Dashboard port |
 
 See `.env.example` for the full list.
@@ -121,43 +131,62 @@ make clean         # Remove generated artifacts
 
 ```
 trade_settlement/
-├── config/                     # YAML configuration
+├── config/                     # YAML configuration (one file per concern)
 │   ├── escalation_matrix.yaml  # Severity & aging thresholds + CSDR penalty rates
 │   ├── matching_tolerances.yaml
-│   └── confirmation_cutoffs.yaml
+│   ├── confirmation_cutoffs.yaml
+│   ├── segment_settlement.yaml # Per-segment settlement cycle & cutoffs (Phase 1)
+│   ├── derivatives_settlement.yaml  # Delivery margin ramp (Phase 2)
+│   ├── margin_framework.yaml   # SPAN/exposure/VaR/cross-margin/limits/collateral (Phase 3)
+│   ├── debt_settlement.yaml    # SGF issuer contribution rate (Phase 4)
+│   └── t0_settlement.yaml      # T+0 trade/obligation cutoffs (Phase 5)
 ├── data/
 │   ├── generated/              # Synthetic CSVs, SQLite DB, reports, ML model
 │   └── knowledge_base/         # Break pattern corpus + FAISS index
+├── docs/
+│   ├── NSE_CLEARING_SETTLEMENT_PLAN.md  # Phase 1-5 build plan
+│   └── TECHNICAL_REFERENCE.md  # Full system architecture + implementation guide
 ├── src/
-│   ├── models/                 # SQLAlchemy schemas + enums
+│   ├── models/                 # SQLAlchemy schemas + enums (all 6 segments)
 │   ├── ingestion/              # Trade capture & normalization (with boundary validation)
-│   ├── netting/                # Obligation engine (VWAP, prov/final)
+│   ├── netting/                # Obligation engine (VWAP, prov/final) — equity cash
 │   ├── ssi/                    # SSI golden-copy validation
-│   ├── matching/               # Two-way matching engine
-│   ├── confirmation/           # Custodian confirmation tracking
-│   ├── instruction/            # Settlement instruction + ISO 20022 formatter
-│   ├── breaks/                 # Break detection rules engine
-│   ├── penalties/              # CSDR progressive cash penalty calculator
-│   ├── auction/                # Auction & close-out workflow
-│   ├── triage/                 # LangGraph pipeline + FAISS KB + ML fail predictor
-│   ├── risk/                   # Counterparty risk scorecard
-│   ├── liquidity/              # Intraday liquidity monitor
-│   ├── reconciliation/         # EOD position reconciliation
-│   ├── reporting/              # Excel + DOCX report generation
-│   ├── utils/                  # Config loader, resilience (retry + circuit breaker)
+│   ├── matching/                # Two-way matching engine
+│   ├── confirmation/             # Custodian confirmation tracking
+│   ├── instruction/               # Settlement instruction + ISO 20022 formatter
+│   ├── breaks/                     # Break detection rules engine
+│   ├── penalties/                   # CSDR progressive cash penalty calculator
+│   ├── auction/                      # Auction & close-out workflow
+│   ├── triage/                        # LangGraph pipeline + FAISS KB + ML fail predictor
+│   ├── risk/                           # Counterparty scorecard + portfolio stress test (Phase 5)
+│   ├── liquidity/                       # Intraday liquidity monitor
+│   ├── reconciliation/                   # EOD position reconciliation
+│   ├── reporting/                         # Excel + DOCX report generation
+│   ├── segments/                          # Per-segment config (Phase 1) + demo seed data
+│   ├── derivatives/                        # MTM/premium/exercise/delivery/bond futures CTD (Phase 2+5)
+│   ├── margins/                            # SPAN/exposure/VaR/delivery/cross margin/limits (Phase 3)
+│   ├── collateral/                         # Collateral manager — haircuts, cash rule, concentration (Phase 3)
+│   ├── debt/                               # Accrued interest, DvP-I, corp actions, G-Sec recon, SGF (Phase 4)
+│   ├── cm_hierarchy/                       # TM-CM hierarchy + obligation aggregation (Phase 5)
+│   ├── sgf/                                # SGF default waterfall simulation (Phase 5)
+│   ├── settlement/                         # T+0 parallel settlement path (Phase 5)
+│   ├── utils/                              # Config loader, resilience (retry + circuit breaker)
 │   ├── settings.py             # 12-factor environment configuration
 │   └── logging_config.py       # Structured logging (structlog JSON/console)
 ├── generators/                 # Synthetic data generator
-├── tests/                      # pytest unit tests (45 tests)
-├── dashboard/                  # Enhanced Streamlit app (8 tabs)
+├── tests/                      # pytest unit tests (430 tests)
+├── dashboard/                  # Streamlit app (10 tabs)
 ├── .github/workflows/ci.yml   # GitHub Actions CI pipeline
 ├── Dockerfile                  # Multi-stage build (pipeline / dashboard / test)
 ├── docker-compose.yml          # Full-stack container orchestration
 ├── Makefile                    # Development & deployment commands
 ├── .env.example                # Environment variable template
-├── main.py                     # 16-stage pipeline orchestrator
+├── main.py                     # 21-step pipeline orchestrator (equity cash + derivatives + margins + debt + advanced features)
 └── requirements.txt
 ```
+
+For the full breakdown of what each Phase 1–5 package does and why, see
+[`docs/TECHNICAL_REFERENCE.md`](docs/TECHNICAL_REFERENCE.md).
 
 ---
 
