@@ -237,7 +237,7 @@ Copy this verbatim into new test files rather than inventing a variant.
 pip install -r requirements.txt
 SETTLE_LOG_FORMAT=console python -m main     # full 21-step pipeline
 streamlit run dashboard/app.py                # 10-tab dashboard
-pytest tests/ -v                              # 430 tests
+pytest tests/ -v                              # 500+ tests
 ```
 
 Toggle any pipeline section without code changes via environment variables

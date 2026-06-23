@@ -16,10 +16,9 @@ from collections import defaultdict
 from datetime import datetime, date
 from decimal import Decimal, ROUND_HALF_UP
 
-from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
-from src.models.database import Trade, Obligation, get_session
+from src.models.database import Trade, Obligation
 from src.models.enums import (
     BuySell,
     ConfirmationStatus,
@@ -30,6 +29,7 @@ from src.models.enums import (
     ObligationStatus,
     SourceSystem,
 )
+from src.utils.clock import utcnow
 
 
 # Netting key: (ISIN, counterparty_id, settlement_date, exchange, source_system)
@@ -81,7 +81,7 @@ def compute_obligations(
         as_of: Timestamp for the computation (defaults to now)
     """
     if as_of is None:
-        as_of = datetime.utcnow()
+        as_of = utcnow()
 
     trades = (
         session.query(Trade)

@@ -2,14 +2,15 @@
 
 import json
 import uuid
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from src.models.database import Base, Obligation, AuctionRecord
+from src.models.database import Base, Obligation
+from src.utils.clock import utcnow
 from src.models.enums import (
     AuctionOutcome,
     AuctionStatus,
@@ -57,7 +58,7 @@ def _make_instructed_sell_obligation(session, settle_date=date(2026, 6, 2)):
         status=ObligationStatus.INSTRUCTED,
         match_status=MatchStatus.MATCHED,
         confirmation_status=ConfirmationStatus.NOT_REQUIRED,
-        computed_at=datetime.utcnow(),
+        computed_at=utcnow(),
         source_trade_ids=json.dumps(["TRD-00001"]),
     )
     session.add(ob)

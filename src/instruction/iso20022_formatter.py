@@ -25,12 +25,12 @@ This is deterministic formatting — no LLM reasoning.
 """
 
 import uuid
-from datetime import datetime
 from xml.etree.ElementTree import Element, SubElement, tostring
 from xml.dom.minidom import parseString
 
 from src.models.database import SettlementInstruction
 from src.models.enums import Depository, InstructionDirection
+from src.utils.clock import utcnow
 
 
 BIC_MAPPING = {
@@ -85,10 +85,10 @@ def format_iso20022(
     # Trade details
     trad_dtls = SubElement(sctrs, "TradDtls")
     trad_dt = SubElement(trad_dtls, "TradDt")
-    SubElement(trad_dt, "Dt").text = datetime.utcnow().strftime("%Y-%m-%d")
+    SubElement(trad_dt, "Dt").text = utcnow().strftime("%Y-%m-%d")
 
     sttlm_dt = SubElement(trad_dtls, "SttlmDt")
-    SubElement(sttlm_dt, "Dt").text = datetime.utcnow().strftime("%Y-%m-%d")
+    SubElement(sttlm_dt, "Dt").text = utcnow().strftime("%Y-%m-%d")
 
     # Financial instrument identification
     fin_instrm_id = SubElement(sctrs, "FinInstrmId")

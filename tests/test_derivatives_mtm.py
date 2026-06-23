@@ -8,7 +8,7 @@ from decimal import Decimal
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from src.models.database import Base, DerivativeContract, DerivativePosition, MTMSettlement
+from src.models.database import Base, DerivativeContract, DerivativePosition
 from src.models.enums import BuySell, ContractType, DeliveryType, ProductSegment
 from src.derivatives.mtm_engine import compute_daily_mtm, get_mtm_summary, net_mtm_by_counterparty
 

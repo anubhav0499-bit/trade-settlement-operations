@@ -165,16 +165,21 @@ trade_settlement/
 │   ├── segments/                          # Per-segment config (Phase 1) + demo seed data
 │   ├── derivatives/                        # MTM/premium/exercise/delivery/bond futures CTD (Phase 2+5)
 │   ├── margins/                            # SPAN/exposure/VaR/delivery/cross margin/limits (Phase 3)
-│   ├── collateral/                         # Collateral manager — haircuts, cash rule, concentration (Phase 3)
-│   ├── debt/                               # Accrued interest, DvP-I, corp actions, G-Sec recon, SGF (Phase 4)
+│   ├── collateral/                         # Collateral manager (haircuts, cash rule, concentration) +
+│   │                                          optimizer (cheapest compliant pledge recommendation) (Phase 3)
+│   ├── debt/                               # Accrued interest, DvP-I (async + atomic modes), corp
+│   │                                          actions, G-Sec recon, SGF (Phase 4)
 │   ├── cm_hierarchy/                       # TM-CM hierarchy + obligation aggregation (Phase 5)
 │   ├── sgf/                                # SGF default waterfall simulation (Phase 5)
-│   ├── settlement/                         # T+0 parallel settlement path (Phase 5)
-│   ├── utils/                              # Config loader, resilience (retry + circuit breaker)
+│   ├── settlement/                         # T+0 path with full intraday cutoff enforcement (Phase 5)
+│   ├── utils/                              # Config loader, naive-UTC clock helper, resilience (retry + circuit breaker)
 │   ├── settings.py             # 12-factor environment configuration
 │   └── logging_config.py       # Structured logging (structlog JSON/console)
 ├── generators/                 # Synthetic data generator
-├── tests/                      # pytest unit tests (430 tests)
+├── tests/                      # pytest unit tests (500+ tests)
+├── backtest/                   # Multi-day synthetic-history harness — structural integrity checks
+│                                  (conservation laws, SGF waterfall, CM aggregation) across a
+│                                  simulated trading calendar, see backtest/run_backtest.py
 ├── dashboard/                  # Streamlit app (10 tabs)
 ├── .github/workflows/ci.yml   # GitHub Actions CI pipeline
 ├── Dockerfile                  # Multi-stage build (pipeline / dashboard / test)

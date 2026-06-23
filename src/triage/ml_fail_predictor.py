@@ -28,15 +28,15 @@ import hashlib
 import hmac
 import math
 import pickle
-from dataclasses import dataclass, field
-from datetime import datetime, date
-from decimal import Decimal
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
 
 from src.models.database import Obligation
 from src.models.enums import CounterpartyType, ObligationStatus, SettlementCycle
+from src.utils.clock import utcnow
 
 
 MODEL_PATH = Path("data/generated/fail_predictor_model.pkl")
@@ -284,7 +284,7 @@ def predict_fail_risk(
 ) -> MLFailRiskScore:
     """Predict settlement fail probability for a single obligation."""
     if current_time is None:
-        current_time = datetime.utcnow()
+        current_time = utcnow()
 
     features = extract_features(obligation, current_time, concurrent_count)
     X = features.reshape(1, -1)
@@ -323,7 +323,7 @@ def predict_fail_risk_batch(
 ) -> list[MLFailRiskScore]:
     """Predict fail risk for a batch of obligations."""
     if current_time is None:
-        current_time = datetime.utcnow()
+        current_time = utcnow()
 
     model = load_model()
 

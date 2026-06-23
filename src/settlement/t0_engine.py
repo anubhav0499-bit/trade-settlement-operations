@@ -38,6 +38,7 @@ from src.models.enums import (
     SettlementCycle,
 )
 from src.netting.obligation_engine import _compute_vwap, _net_trades
+from src.utils.clock import utcnow
 from src.utils.config_loader import get_t0_settlement_config
 
 
@@ -103,7 +104,7 @@ def compute_t0_obligations(
     via partition_t0_eligible_trades before this point in the day.
     """
     if as_of is None:
-        as_of = datetime.utcnow()
+        as_of = utcnow()
     if current_time is not None and not is_within_obligation_cutoff(current_time):
         return []
 

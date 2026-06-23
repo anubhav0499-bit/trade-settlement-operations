@@ -12,7 +12,6 @@ the SSI that was current at their settlement date.
 from dataclasses import dataclass
 from datetime import date
 
-from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
 from src.models.database import Obligation, SSIRecord, BreakRecord
@@ -46,7 +45,7 @@ def get_active_ssi(
             SSIRecord.counterparty_id == counterparty_id,
             SSIRecord.effective_from <= as_of_date,
             (SSIRecord.effective_to.is_(None)) | (SSIRecord.effective_to >= as_of_date),
-            SSIRecord.is_active == True,
+            SSIRecord.is_active.is_(True),
         )
         .first()
     )

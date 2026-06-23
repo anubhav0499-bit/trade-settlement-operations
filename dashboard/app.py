@@ -14,7 +14,6 @@ Tabs:
   10. Risk & SGF — margin utilization and default waterfall simulator
 """
 
-import json
 import sys
 from datetime import date, datetime
 from decimal import Decimal
@@ -34,17 +33,13 @@ from src.models.database import (
     MarginRecord,
     Obligation,
     Trade,
-    create_tables,
     get_engine,
     get_session,
 )
 from src.models.enums import (
     BreakStatus,
-    BreakType,
-    MatchStatus,
     ObligationStage,
     ObligationStatus,
-    Severity,
 )
 from src.cm_hierarchy.hierarchy import aggregate_obligations, get_sub_tms
 from src.sgf.waterfall import WaterfallInputs, get_waterfall_summary, run_default_waterfall

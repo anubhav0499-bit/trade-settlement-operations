@@ -26,6 +26,7 @@ from src.models.enums import (
     Severity,
     SettlementCycle,
 )
+from src.utils.clock import utcnow
 from src.utils.config_loader import get_escalation_config
 
 
@@ -35,7 +36,7 @@ def update_break_aging(
 ) -> list[BreakRecord]:
     """Update age and escalation for all open breaks."""
     if current_time is None:
-        current_time = datetime.utcnow()
+        current_time = utcnow()
 
     config = get_escalation_config()
     updated = []

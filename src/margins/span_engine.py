@@ -16,7 +16,7 @@ conservative for an unpriced option rather than silently ignoring its risk.
 All computation is deterministic and rule-based — no LLM reasoning.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_UP
 
 from sqlalchemy.orm import Session
@@ -147,7 +147,9 @@ def compute_span_margin(
     total_margin = max(scenario_margin, short_option_minimum) + calendar_spread_charge - net_option_value
     total_margin = max(Decimal("0"), total_margin)
 
-    quantize = lambda d: d.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    def quantize(d: Decimal) -> Decimal:
+        return d.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
     return SpanMarginResult(
         counterparty_id=counterparty_id,
         underlying=underlying,

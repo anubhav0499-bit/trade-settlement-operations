@@ -22,8 +22,8 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
-from src.models.database import BreakRecord, Obligation
-from src.models.enums import BreakType, NetDirection, SettlementCycle
+from src.models.database import Obligation
+from src.models.enums import NetDirection
 
 
 @dataclass

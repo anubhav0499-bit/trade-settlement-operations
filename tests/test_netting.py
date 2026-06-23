@@ -1,8 +1,7 @@
 """Unit tests for the netting & obligation engine."""
 
-import json
 import uuid
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal
 
 import pytest
@@ -25,6 +24,7 @@ from src.netting.obligation_engine import (
     _net_trades,
     compute_obligations,
 )
+from src.utils.clock import utcnow
 
 
 @pytest.fixture
@@ -65,7 +65,7 @@ def _make_trade(
         currency="INR",
         source_system=source,
         segment=Segment.NORMAL,
-        created_at=datetime.utcnow(),
+        created_at=utcnow(),
     )
 
 

@@ -9,16 +9,13 @@ Includes: STP rate, custodian confirmation rate, cost-of-exception,
 break distribution, counterparty analysis.
 """
 
-import json
-from datetime import date, datetime
-from decimal import Decimal
+from datetime import datetime
 from pathlib import Path
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from docx import Document
-from docx.shared import Inches, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from sqlalchemy.orm import Session
 
@@ -27,13 +24,9 @@ from src.models.database import (
     AuctionRecord,
     BreakRecord,
     Obligation,
-    SettlementInstruction,
     Trade,
 )
 from src.models.enums import (
-    AuctionOutcome,
-    BreakStatus,
-    BreakType,
     MatchStatus,
     ObligationStage,
     ObligationStatus,
@@ -380,7 +373,7 @@ def generate_docx_report(
     for bt, count in type_dist.most_common():
         doc.add_paragraph(f"{bt}: {count} ({count/total_breaks*100:.1f}%)", style="List Bullet")
 
-    doc.add_paragraph(f"\nSeverity distribution: " + ", ".join(
+    doc.add_paragraph("\nSeverity distribution: " + ", ".join(
         f"{s}: {c}" for s, c in sev_dist.most_common()
     ))
 

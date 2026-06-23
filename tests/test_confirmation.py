@@ -2,7 +2,7 @@
 
 import json
 import uuid
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from decimal import Decimal
 
 import pytest
@@ -27,6 +27,7 @@ from src.confirmation.custodian_confirm import (
     process_confirmations,
     _late_confirmation_severity,
 )
+from src.utils.clock import utcnow
 
 
 @pytest.fixture
@@ -61,7 +62,7 @@ def _make_matched_obligation(
         status=ObligationStatus.MATCHED,
         match_status=MatchStatus.MATCHED,
         confirmation_status=ConfirmationStatus.PENDING,
-        computed_at=datetime.utcnow(),
+        computed_at=utcnow(),
         source_trade_ids=json.dumps(["TRD-00001"]),
     )
 

@@ -15,19 +15,17 @@ Key capabilities:
 This is deterministic arithmetic — no LLM reasoning.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
-from src.models.database import Obligation, SettlementInstruction
+from src.models.database import Obligation
 from src.models.enums import (
-    InstructionDirection,
     NetDirection,
     ObligationStage,
     ObligationStatus,
-    SettlementCycle,
 )
 
 

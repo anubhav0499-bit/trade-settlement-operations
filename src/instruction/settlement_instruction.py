@@ -7,11 +7,10 @@ Marks the obligation as INSTRUCTED once the instruction is generated.
 """
 
 import uuid
-from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from src.models.database import Obligation, SettlementInstruction, SSIRecord
+from src.models.database import Obligation, SettlementInstruction
 from src.models.enums import (
     InstructionDirection,
     InstructionStatus,
@@ -19,6 +18,7 @@ from src.models.enums import (
     ObligationStatus,
 )
 from src.ssi.golden_copy import get_active_ssi
+from src.utils.clock import utcnow
 
 
 def generate_instruction(
@@ -56,7 +56,7 @@ def generate_instruction(
         bank_account=ssi.bank_account,
         depository=ssi.depository,
         status=InstructionStatus.GENERATED,
-        generated_at=datetime.utcnow(),
+        generated_at=utcnow(),
     )
 
     obligation.status = ObligationStatus.INSTRUCTED

@@ -83,7 +83,6 @@ def optimize_collateral_pledge(
     at the lowest haircut cost, without breaching the cash-minimum or
     concentration rules on the resulting total portfolio."""
     config = get_margin_framework_config()["collateral"]
-    min_cash_pct = Decimal(str(config["min_cash_pct"])) / Decimal("100")
     concentration_limit_pct = Decimal(str(config["concentration_limit_pct"])) / Decimal("100")
     cash_equivalent_types = {
         CollateralType.CASH, CollateralType.BANK_GUARANTEE, CollateralType.FIXED_DEPOSIT,

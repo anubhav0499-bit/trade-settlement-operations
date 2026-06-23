@@ -10,7 +10,7 @@ In the Indian market (NSE/BSE), this step is called "custodian confirmation"
 """
 
 import uuid
-from datetime import datetime, date, time, timedelta
+from datetime import datetime, date, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -24,6 +24,7 @@ from src.models.enums import (
     SettlementCycle,
     Severity,
 )
+from src.utils.clock import utcnow
 from src.utils.config_loader import get_confirmation_config
 
 
@@ -69,7 +70,7 @@ def process_confirmations(
         (confirmed, late/rejected, late_confirmation_breaks)
     """
     if current_time is None:
-        current_time = datetime.utcnow()
+        current_time = utcnow()
 
     config = get_confirmation_config()
     confirmed_obs = []

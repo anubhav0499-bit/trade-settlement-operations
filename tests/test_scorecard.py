@@ -1,6 +1,5 @@
 """Stress tests for counterparty risk scorecard."""
 
-import json
 import uuid
 import pytest
 from datetime import date
@@ -12,7 +11,7 @@ from sqlalchemy.orm import sessionmaker
 from src.models.database import Base, BreakRecord, Obligation
 from src.models.enums import (
     BreakStatus, BreakType, ConfirmationStatus, CounterpartyType, Exchange,
-    MatchStatus, NetDirection, ObligationStage, ObligationStatus, Severity,
+    NetDirection, ObligationStage, ObligationStatus, Severity,
     SettlementCycle,
 )
 from src.risk.counterparty_scorecard import (

@@ -2,7 +2,7 @@
 
 import uuid
 import pytest
-from datetime import datetime, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
 from sqlalchemy import create_engine
@@ -13,6 +13,7 @@ from src.models.enums import (
     BreakStatus, BreakType, CounterpartyType, Exchange, NetDirection,
     ObligationStage, ObligationStatus, Severity, SettlementCycle,
 )
+from src.utils.clock import utcnow
 from src.breaks.rules_engine import (
     _apply_late_confirmation_escalation,
     _apply_t0_escalation,
@@ -53,7 +54,7 @@ def _add_obligation(
         net_direction=NetDirection.PAY_IN,
         vwap_price=Decimal("2900.00"),
         net_value=Decimal("290000"),
-        settlement_date=datetime.utcnow().date(),
+        settlement_date=utcnow().date(),
         settlement_cycle=settlement_cycle,
         counterparty_id="BRK-001",
         counterparty_type=CounterpartyType.BROKER,
@@ -241,7 +242,7 @@ class TestLateConfirmationEscalation:
 class TestUpdateBreakAging:
     def test_ages_open_breaks(self, db_session):
         ob = _add_obligation(db_session, settlement_cycle=SettlementCycle.T1)
-        created = datetime.utcnow() - timedelta(hours=48)
+        created = utcnow() - timedelta(hours=48)
         _add_break(db_session, ob.obligation_id, created_at=created)
         updated = update_break_aging(db_session)
         assert len(updated) == 1
@@ -255,8 +256,8 @@ class TestUpdateBreakAging:
 
     def test_t0_break_escalates(self, db_session):
         ob = _add_obligation(db_session, settlement_cycle=SettlementCycle.T0)
-        created = datetime.utcnow() - timedelta(hours=6)
-        brk = _add_break(db_session, ob.obligation_id, created_at=created)
+        created = utcnow() - timedelta(hours=6)
+        _add_break(db_session, ob.obligation_id, created_at=created)
         updated = update_break_aging(db_session)
         assert len(updated) == 1
         assert updated[0].escalation_level >= 1

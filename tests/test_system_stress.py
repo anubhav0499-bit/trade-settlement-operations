@@ -18,10 +18,10 @@ from sqlalchemy.orm import sessionmaker
 from src.models.database import (
     Base, ClearingMember, CollateralRecord, CustodianHolding,
     DebtInstrument, DebtTrade, DerivativeContract, DerivativePosition,
-    MTMSettlement, Obligation, SSIRecord, Trade,
+    SSIRecord, Trade,
 )
 from src.models.enums import (
-    BuySell, CMType, CollateralType, ConfirmationStatus, ContractType,
+    BuySell, CMType, CollateralType, ContractType,
     CounterpartyType, DayCountConvention, DebtInstrumentType,
     DebtTradeStatus, DeliveryType, Depository, Exchange,
     MatchStatus, NetDirection, ObligationStage, ObligationStatus,
@@ -36,7 +36,7 @@ from src.penalties.csdr_penalties import compute_penalties_batch
 from src.reconciliation.position_recon import derive_positions, reconcile_positions
 from src.risk.counterparty_scorecard import compute_scorecard
 from src.liquidity.intraday_monitor import generate_intraday_report
-from src.breaks.rules_engine import update_break_aging, get_break_summary
+from src.breaks.rules_engine import get_break_summary
 
 # Phase 2 — derivatives
 from src.derivatives.mtm_engine import compute_daily_mtm, net_mtm_by_counterparty
@@ -53,8 +53,6 @@ from src.derivatives.bond_futures import DeliverableBond
 from src.margins.span_engine import compute_span_margin
 from src.margins.exposure_margin import compute_exposure_margin
 from src.margins.var_model import ewma_volatility, compute_var_margin
-from src.margins.delivery_margin import record_delivery_margin
-from src.margins.cross_margin import compute_cross_margin_benefit, apply_cross_margin
 from src.margins.position_limits import (
     check_market_wide_limit, check_cm_level_limit, check_client_level_limit, market_wide_limit,
 )
@@ -64,7 +62,7 @@ from src.collateral.manager import (
 from src.utils.config_loader import get_margin_framework_config
 
 # Phase 4 — debt
-from src.debt.accrued_interest import compute_accrued_interest, day_count_fraction
+from src.debt.accrued_interest import compute_accrued_interest
 from src.debt.corporate_bond_settlement import mark_securities_received, mark_funds_received
 from src.debt.corporate_actions import compute_coupon_payment, compute_redemption_amount
 from src.debt.sgf_contribution import compute_sgf_issuer_contribution
@@ -355,8 +353,7 @@ class TestHighVolumeEquityCash:
         db_session.commit()
 
         valid_obs, ssi_breaks = validate_all_obligations(db_session, internal)
-        results = match_obligations(valid_obs, broker, {"price_tolerance_pct": 1.0, "quantity_tolerance_abs": 0})
-        matched = sum(1 for r in results if r.status == MatchStatus.MATCHED)
+        match_obligations(valid_obs, broker, {"price_tolerance_pct": 1.0, "quantity_tolerance_abs": 0})
 
         for ob in valid_obs:
             if ob.match_status == MatchStatus.MATCHED:
@@ -376,7 +373,7 @@ class TestHighVolumeEquityCash:
                 quantity=pos.quantity, statement_date=SETTLE_DATE,
             ))
         db_session.commit()
-        recon = reconcile_positions(db_session, SETTLE_DATE)
+        reconcile_positions(db_session, SETTLE_DATE)
 
         sc = compute_scorecard(db_session, COUNTERPARTIES[0])
         assert sc.composite_score >= 0
@@ -826,8 +823,8 @@ class TestCrossModuleIntegration:
         # Phase 2: derivatives
         contracts, _ = _seed_derivative_universe(db_session, 3, 5)
         prices = {c.contract_id: Decimal(str(round(RNG.uniform(100, 2000), 2))) for c in contracts}
-        mtm = compute_daily_mtm(db_session, TRADE_DATE, prices)
-        premiums = compute_premium_obligations(db_session, TRADE_DATE)
+        compute_daily_mtm(db_session, TRADE_DATE, prices)
+        compute_premium_obligations(db_session, TRADE_DATE)
 
         # Phase 3: margins
         for underlying in list({c.underlying for c in contracts}):
@@ -843,7 +840,7 @@ class TestCrossModuleIntegration:
             mark_funds_received(db_session, dt.trade_id)
 
         # Phase 5: CM hierarchy + waterfall
-        cm_ids = _seed_cm_hierarchy(db_session, 6)
+        _seed_cm_hierarchy(db_session, 6)
         steps = run_default_waterfall(
             Decimal("100000"),
             WaterfallInputs(

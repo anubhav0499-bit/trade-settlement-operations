@@ -1,14 +1,12 @@
 """Stress tests for ISO 20022 settlement message formatter."""
 
-import pytest
 from xml.etree.ElementTree import fromstring
 from decimal import Decimal
 
 from src.models.database import SettlementInstruction
-from src.models.enums import Depository, InstructionDirection, InstructionStatus
+from src.models.enums import Depository, InstructionDirection
 from src.instruction.iso20022_formatter import (
     BIC_MAPPING,
-    DEPOSITORY_BIC,
     NAMESPACE,
     format_batch,
     format_iso20022,

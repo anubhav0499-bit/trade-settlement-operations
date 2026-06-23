@@ -15,10 +15,10 @@ Features:
 
 from dataclasses import dataclass
 from datetime import datetime
-from decimal import Decimal
 
 from src.models.database import Obligation
 from src.models.enums import ObligationStatus, SettlementCycle
+from src.utils.clock import utcnow
 
 
 @dataclass
@@ -53,7 +53,7 @@ def compute_fail_risk(
 ) -> FailRiskScore:
     """Compute fail-risk score for a single obligation."""
     if current_time is None:
-        current_time = datetime.utcnow()
+        current_time = utcnow()
 
     factors = {}
 

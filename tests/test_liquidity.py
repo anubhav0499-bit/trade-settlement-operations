@@ -10,12 +10,10 @@ from sqlalchemy.orm import sessionmaker
 
 from src.models.database import Base, Obligation
 from src.models.enums import (
-    CounterpartyType, Exchange, MatchStatus, NetDirection,
+    CounterpartyType, Exchange, NetDirection,
     ObligationStage, ObligationStatus, SettlementCycle,
 )
 from src.liquidity.intraday_monitor import (
-    ALERT_THRESHOLDS,
-    LiquidityAlert,
     LiquiditySnapshot,
     SettlementVelocity,
     check_alerts,

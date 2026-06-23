@@ -2,7 +2,6 @@
 
 import time
 import pytest
-from unittest.mock import patch
 
 from src.utils.resilience import (
     CircuitBreaker,

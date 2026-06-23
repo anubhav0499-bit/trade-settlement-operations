@@ -1,6 +1,5 @@
 """High-volume stress tests and end-to-end integration test."""
 
-import json
 import time
 import uuid
 import pytest
@@ -11,11 +10,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from src.models.database import (
-    Base, CustodianHolding, Obligation, SSIRecord, Trade,
+    Base, CustodianHolding, SSIRecord, Trade,
 )
 from src.models.enums import (
-    BuySell, ConfirmationStatus, CounterpartyType, Depository, Exchange,
-    MatchStatus, NetDirection, ObligationStage, ObligationStatus,
+    BuySell, CounterpartyType, Depository, Exchange,
+    MatchStatus, ObligationStage, ObligationStatus,
     Segment, SettlementCycle, SourceSystem,
 )
 from src.netting.obligation_engine import compute_obligations
@@ -25,7 +24,7 @@ from src.reconciliation.position_recon import derive_positions, reconcile_positi
 from src.ssi.golden_copy import validate_all_obligations
 from src.risk.counterparty_scorecard import compute_scorecard
 from src.liquidity.intraday_monitor import generate_intraday_report
-from src.breaks.rules_engine import update_break_aging, get_break_summary
+from src.breaks.rules_engine import get_break_summary
 
 
 @pytest.fixture
@@ -190,9 +189,7 @@ class TestEndToEndIntegration:
 
         # 4. Matching
         config = {"price_tolerance_pct": 1.0, "quantity_tolerance_abs": 0}
-        match_results = match_obligations(valid_obs, broker_obs, config)
-        matched_count = sum(1 for r in match_results if r.status == MatchStatus.MATCHED)
-        break_count = sum(1 for r in match_results if r.status == MatchStatus.BREAK)
+        match_obligations(valid_obs, broker_obs, config)
 
         # 5. Settle matched obligations
         for ob in valid_obs:
@@ -225,8 +222,7 @@ class TestEndToEndIntegration:
             db_session.add(h)
         db_session.commit()
 
-        recon_results = reconcile_positions(db_session, date(2026, 6, 15))
-        reconciled = sum(1 for r in recon_results if r.is_reconciled)
+        reconcile_positions(db_session, date(2026, 6, 15))
 
         # 8. Scorecard
         sc = compute_scorecard(db_session, COUNTERPARTIES[0])

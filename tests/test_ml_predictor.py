@@ -3,11 +3,8 @@
 import hashlib
 import hmac
 import math
-import pickle
-import tempfile
 from datetime import date, datetime
 from decimal import Decimal
-from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
@@ -15,7 +12,7 @@ import pytest
 
 from src.models.database import Obligation
 from src.models.enums import (
-    CounterpartyType, Exchange, MatchStatus, NetDirection,
+    CounterpartyType, Exchange, NetDirection,
     ObligationStage, ObligationStatus, SettlementCycle,
 )
 from src.triage.ml_fail_predictor import (

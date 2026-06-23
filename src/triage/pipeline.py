@@ -10,22 +10,12 @@ Every node writes a reasoning chain to the agentic audit log.
 
 import json
 import uuid
-from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Annotated, TypedDict
+from typing import TypedDict
 
 from langgraph.graph import END, StateGraph
 
-from src.models.database import AgenticAuditLog, BreakRecord, Obligation
-from src.models.enums import (
-    BreakStatus,
-    BreakType,
-    MatchStatus,
-    ObligationStatus,
-    Severity,
-)
-from src.triage.fail_risk import compute_fail_risk_batch, get_high_risk_queue, FailRiskScore
 from src.triage.knowledge_base import query_knowledge_base
+from src.utils.clock import utcnow
 from src.utils.config_loader import get_escalation_config
 
 
@@ -61,7 +51,7 @@ def _log_entry(
         "inputs": json.dumps(inputs),
         "conclusion": conclusion,
         "rationale": rationale,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": utcnow().isoformat(),
     }
 
 

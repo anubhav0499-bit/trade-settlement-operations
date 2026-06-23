@@ -16,10 +16,10 @@ test:  ## Run the test suite
 	python -m pytest tests/ -v --tb=short
 
 lint:  ## Run ruff linter
-	python -m ruff check src/ tests/ main.py dashboard/
+	python -m ruff check src/ tests/ main.py dashboard/ backtest/
 
 generate-data:  ## Generate synthetic reference & trade data
-	python -c "from generators.reference_data import generate_all; generate_all()"
+	python -m generators.synthetic_data
 
 clean:  ## Remove generated artifacts
 	rm -rf data/generated/settlement.db data/generated/*.pkl data/generated/*.hmac

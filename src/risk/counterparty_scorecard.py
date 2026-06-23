@@ -21,17 +21,14 @@ This is deterministic arithmetic — no LLM reasoning.
 
 from dataclasses import dataclass
 from datetime import date
-from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
-from src.models.database import BreakRecord, Obligation, Trade
+from src.models.database import BreakRecord, Obligation
 from src.models.enums import (
-    BreakStatus,
     ConfirmationStatus,
     ObligationStage,
     ObligationStatus,
-    SourceSystem,
 )
 
 

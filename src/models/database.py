@@ -1,6 +1,4 @@
 import json
-from datetime import date, datetime
-from decimal import Decimal
 
 from sqlalchemy import (
     Boolean,
@@ -48,6 +46,7 @@ from src.models.enums import (
     Severity,
     SourceSystem,
 )
+from src.utils.clock import utcnow
 
 
 class Base(DeclarativeBase):
@@ -75,7 +74,7 @@ class Trade(Base):
     product_segment = Column(
         SAEnum(ProductSegment), nullable=False, default=ProductSegment.EQUITY_CASH
     )
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=utcnow)
 
 
 class Obligation(Base):
@@ -108,7 +107,7 @@ class Obligation(Base):
         nullable=False,
         default=ConfirmationStatus.NOT_REQUIRED,
     )
-    computed_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    computed_at = Column(DateTime, nullable=False, default=utcnow)
     source_trade_ids = Column(Text, nullable=False)  # JSON list
     instruction_id = Column(String, nullable=True)
 
@@ -149,7 +148,7 @@ class BreakRecord(Base):
     resolution_notes = Column(Text, nullable=True)
     resolved_by = Column(String, nullable=True)
     resolved_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=utcnow)
     escalation_level = Column(Integer, nullable=False, default=0)
 
 
@@ -172,7 +171,7 @@ class SettlementInstruction(Base):
         nullable=False,
         default=InstructionStatus.GENERATED,
     )
-    generated_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    generated_at = Column(DateTime, nullable=False, default=utcnow)
 
 
 class AuctionRecord(Base):
@@ -192,7 +191,7 @@ class AuctionRecord(Base):
     status = Column(
         SAEnum(AuctionStatus), nullable=False, default=AuctionStatus.INITIATED
     )
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=utcnow)
 
 
 class Counterparty(Base):
@@ -228,7 +227,7 @@ class AgenticAuditLog(Base):
     inputs = Column(Text, nullable=False)  # JSON
     conclusion = Column(Text, nullable=False)
     rationale = Column(Text, nullable=False)
-    timestamp = Column(DateTime, nullable=False, default=datetime.utcnow)
+    timestamp = Column(DateTime, nullable=False, default=utcnow)
 
 
 class PositionRecord(Base):
@@ -241,7 +240,7 @@ class PositionRecord(Base):
     isin = Column(String, nullable=False, index=True)
     quantity = Column(Integer, nullable=False)
     as_of_date = Column(Date, nullable=False, index=True)
-    last_updated = Column(DateTime, nullable=False, default=datetime.utcnow)
+    last_updated = Column(DateTime, nullable=False, default=utcnow)
 
 
 class DerivativeContract(Base):
@@ -259,7 +258,7 @@ class DerivativeContract(Base):
     lot_size = Column(Integer, nullable=False)
     expiry_date = Column(Date, nullable=False, index=True)
     currency = Column(String, nullable=False, default="INR")
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=utcnow)
 
 
 class DerivativePosition(Base):
@@ -274,7 +273,7 @@ class DerivativePosition(Base):
     quantity = Column(Integer, nullable=False)
     trade_price = Column(Numeric(12, 4), nullable=False)
     position_date = Column(Date, nullable=False, index=True)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=utcnow)
 
 
 class MTMSettlement(Base):
@@ -288,7 +287,7 @@ class MTMSettlement(Base):
     settlement_date = Column(Date, nullable=False, index=True)
     settlement_price = Column(Numeric(12, 4), nullable=False)
     mtm_amount = Column(Numeric(15, 2), nullable=False)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=utcnow)
 
 
 class MarginRecord(Base):
@@ -302,7 +301,7 @@ class MarginRecord(Base):
     margin_type = Column(SAEnum(MarginType), nullable=False)
     amount = Column(Numeric(15, 2), nullable=False)
     as_of_date = Column(Date, nullable=False, index=True)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=utcnow)
 
 
 class CollateralRecord(Base):
@@ -316,7 +315,7 @@ class CollateralRecord(Base):
     value = Column(Numeric(15, 2), nullable=False)
     haircut_pct = Column(Float, nullable=False, default=0.0)
     as_of_date = Column(Date, nullable=False, index=True)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=utcnow)
 
 
 class DebtInstrument(Base):
@@ -333,7 +332,7 @@ class DebtInstrument(Base):
     issue_date = Column(Date, nullable=False)
     maturity_date = Column(Date, nullable=False, index=True)
     day_count_convention = Column(SAEnum(DayCountConvention), nullable=False)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=utcnow)
 
 
 class DebtTrade(Base):
@@ -356,7 +355,7 @@ class DebtTrade(Base):
     )
     securities_received = Column(Boolean, nullable=False, default=False)
     funds_received = Column(Boolean, nullable=False, default=False)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=utcnow)
 
 
 class ClearingMember(Base):
@@ -375,7 +374,7 @@ class ClearingMember(Base):
     net_worth = Column(Numeric(15, 2), nullable=False)
     security_deposit = Column(Numeric(15, 2), nullable=False)
     is_active = Column(Boolean, nullable=False, default=True)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=utcnow)
 
 
 def get_engine(db_path: str = "data/generated/settlement.db"):

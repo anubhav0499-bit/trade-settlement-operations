@@ -6,7 +6,6 @@ root-cause investigator node to retrieve relevant historical precedents.
 """
 
 import json
-import logging
 from pathlib import Path
 
 import faiss

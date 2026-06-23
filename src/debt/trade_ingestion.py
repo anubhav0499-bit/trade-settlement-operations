@@ -17,6 +17,7 @@ from decimal import Decimal, InvalidOperation
 
 from src.models.database import DebtTrade
 from src.models.enums import DebtTradeStatus, ProductSegment
+from src.utils.clock import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +79,7 @@ def normalize_cbrics_trades(records: list[dict]) -> list[DebtTrade]:
                 product_segment=ProductSegment.DEBT_CORP_BOND,
                 source="CBRICS",
                 status=DebtTradeStatus.PENDING,
-                created_at=datetime.utcnow(),
+                created_at=utcnow(),
             ))
         except (ValidationError, KeyError, ValueError) as e:
             logger.warning("Skipping invalid CBRICS record %s: %s", record_id, e)
@@ -107,7 +108,7 @@ def normalize_rfq_trades(records: list[dict]) -> list[DebtTrade]:
                 product_segment=ProductSegment.DEBT_CORP_BOND,
                 source="RFQ",
                 status=DebtTradeStatus.PENDING,
-                created_at=datetime.utcnow(),
+                created_at=utcnow(),
             ))
         except (ValidationError, KeyError, ValueError) as e:
             logger.warning("Skipping invalid RFQ record %s: %s", record_id, e)
@@ -138,7 +139,7 @@ def normalize_ccil_reports(records: list[dict]) -> list[DebtTrade]:
                 product_segment=ProductSegment.DEBT_GSEC,
                 source="CCIL",
                 status=DebtTradeStatus.PENDING,
-                created_at=datetime.utcnow(),
+                created_at=utcnow(),
             ))
         except (ValidationError, KeyError, ValueError) as e:
             logger.warning("Skipping invalid CCIL record %s: %s", record_id, e)

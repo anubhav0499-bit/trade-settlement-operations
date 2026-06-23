@@ -13,7 +13,6 @@ than crashing the pipeline.
 import csv
 import logging
 import re
-import uuid
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -30,6 +29,7 @@ from src.models.enums import (
     SettlementCycle,
     SourceSystem,
 )
+from src.utils.clock import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +113,7 @@ def normalize_oms_trades(records: list[dict]) -> list[Trade]:
                 currency=r["currency"],
                 source_system=SourceSystem.OMS,
                 segment=segment,
-                created_at=datetime.utcnow(),
+                created_at=utcnow(),
             ))
         except (ValidationError, KeyError, ValueError) as e:
             logger.warning("Skipping invalid OMS record %s: %s", record_id, e)
@@ -156,7 +156,7 @@ def normalize_broker_confirmations(records: list[dict]) -> list[Trade]:
                 currency=r["CCY"],
                 source_system=SourceSystem.BROKER_CONFIRM,
                 segment=Segment.NORMAL,
-                created_at=datetime.utcnow(),
+                created_at=utcnow(),
             ))
         except (ValidationError, KeyError, ValueError) as e:
             logger.warning("Skipping invalid broker record %s: %s", record_id, e)
@@ -192,7 +192,7 @@ def normalize_custodian_statements(records: list[dict]) -> list[Trade]:
                 currency=r["ccy"],
                 source_system=SourceSystem.CUSTODIAN_STATEMENT,
                 segment=Segment.NORMAL,
-                created_at=datetime.utcnow(),
+                created_at=utcnow(),
             ))
         except (ValidationError, KeyError, ValueError) as e:
             logger.warning("Skipping invalid custodian record %s: %s", record_id, e)

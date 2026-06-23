@@ -11,7 +11,7 @@ from src.ingestion.normalizer import (
     normalize_broker_confirmations,
     normalize_custodian_statements,
 )
-from src.models.enums import Exchange, BuySell, SettlementCycle
+from src.models.enums import Exchange, BuySell
 from decimal import Decimal
 
 

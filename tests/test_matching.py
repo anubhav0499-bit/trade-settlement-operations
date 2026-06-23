@@ -2,7 +2,7 @@
 
 import json
 import uuid
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal
 
 import pytest
@@ -22,6 +22,7 @@ from src.models.enums import (
     BreakType,
 )
 from src.matching.engine import match_obligations, _price_within_tolerance
+from src.utils.clock import utcnow
 
 
 @pytest.fixture
@@ -64,7 +65,7 @@ def _make_obligation(
         status=ObligationStatus.SSI_VALIDATED,
         match_status=MatchStatus.UNMATCHED,
         confirmation_status=ConfirmationStatus.NOT_REQUIRED,
-        computed_at=datetime.utcnow(),
+        computed_at=utcnow(),
         source_trade_ids=json.dumps([trade_id]),
     )
 

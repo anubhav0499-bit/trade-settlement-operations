@@ -1,6 +1,5 @@
 """Stress tests for SSI golden-copy validation module."""
 
-import json
 import uuid
 import pytest
 from datetime import date
@@ -12,7 +11,7 @@ from sqlalchemy.orm import sessionmaker
 from src.models.database import Base, Obligation, SSIRecord, BreakRecord
 from src.models.enums import (
     BreakType, CounterpartyType, Depository, Exchange,
-    MatchStatus, NetDirection, ObligationStage, ObligationStatus, Severity,
+    NetDirection, ObligationStage, ObligationStatus, Severity,
 )
 from src.ssi.golden_copy import (
     get_active_ssi,

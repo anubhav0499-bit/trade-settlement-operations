@@ -25,7 +25,6 @@ Execution order:
 21. Run advanced features (CM hierarchy, SGF waterfall, stress test, T+0, bond futures CTD)
 """
 
-import json
 import os
 import signal
 import sys
@@ -34,7 +33,6 @@ from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
 
-from sqlalchemy.orm import Session
 
 from src.logging_config import get_logger, setup_logging
 from src.settings import (
@@ -70,7 +68,6 @@ from src.models.enums import (
     ObligationStatus,
     ProductSegment,
     SettlementCycle,
-    SourceSystem,
 )
 
 logger = get_logger(__name__)
@@ -144,7 +141,7 @@ def _run_equity_cash_pipeline():
     # ── Step 2: Netting & Obligations ───────────────────────────────────
     logger.info("step.start", step=2, name="netting")
     from src.netting.obligation_engine import compute_all_obligations, get_obligations_for_matching
-    obligation_map = compute_all_obligations(session)
+    compute_all_obligations(session)
     total_obligations = session.query(Obligation).count()
     logger.info("step.complete", step=2, name="netting", obligations=total_obligations)
     _check_shutdown("step_2")
@@ -238,7 +235,7 @@ def _run_equity_cash_pipeline():
     logger.info("step.start", step=8, name="break_detection")
     from src.breaks.rules_engine import update_break_aging, get_break_summary
 
-    updated_breaks = update_break_aging(session, current_time)
+    update_break_aging(session, current_time)
     summary = get_break_summary(session)
     logger.info("step.complete", step=8, name="break_detection",
                 total_breaks=summary["total"],
@@ -248,7 +245,7 @@ def _run_equity_cash_pipeline():
 
     # ── Step 9: Auction / Close-out ────────────────────────────────────
     logger.info("step.start", step=9, name="auction")
-    from src.auction.close_out import detect_short_deliveries, initiate_auction, execute_auction
+    from src.auction.close_out import initiate_auction, execute_auction
 
     instructed_obs = (
         session.query(Obligation)
@@ -298,11 +295,7 @@ def _run_equity_cash_pipeline():
     penalty_assessments = []
     if ENABLE_CSDR_PENALTIES:
         logger.info("step.start", step=10, name="csdr_penalties")
-        from src.penalties.csdr_penalties import (
-            compute_penalties_batch,
-            aggregate_by_counterparty,
-            get_penalty_summary,
-        )
+        from src.penalties.csdr_penalties import compute_penalties_batch, get_penalty_summary
 
         failed_obs = (
             session.query(Obligation)
@@ -322,7 +315,6 @@ def _run_equity_cash_pipeline():
             fail_pairs = [(ob, ob.settlement_date) for ob in failed_obs]
             penalty_assessments = compute_penalties_batch(fail_pairs, assessment_date)
             penalty_summary = get_penalty_summary(penalty_assessments)
-            cp_penalties = aggregate_by_counterparty(penalty_assessments)
             logger.info("step.complete", step=10, name="csdr_penalties",
                         assessed=penalty_summary["total_fails"],
                         total_penalties=float(penalty_summary["total_penalties"]))
@@ -344,7 +336,7 @@ def _run_equity_cash_pipeline():
             train_model,
         )
 
-        ml_model = train_model()
+        train_model()
 
         ml_pending_obs = (
             session.query(Obligation)
@@ -543,7 +535,6 @@ def _run_equity_cash_pipeline():
         CM_IDS,
         CORP_BOND_ISIN,
         EXPIRY_DATE,
-        GSEC_ISIN,
         NIFTY_CE,
         NIFTY_FUT,
         RELIANCE_CE,

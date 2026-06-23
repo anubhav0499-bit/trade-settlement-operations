@@ -55,7 +55,7 @@ jobs:
         run: pip install ruff
 
       - name: Lint
-        run: ruff check src/ tests/ main.py dashboard/ --output-format=github
+        run: ruff check src/ tests/ main.py dashboard/ backtest/ --output-format=github
 
   docker:
     runs-on: ubuntu-latest
